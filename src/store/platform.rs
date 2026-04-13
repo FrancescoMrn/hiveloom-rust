@@ -44,6 +44,21 @@ const PLATFORM_MIGRATIONS: &[(&str, &str)] = &[
         );
     "#,
     ),
+    (
+        "0004_create_mcp_oauth_clients",
+        r#"
+        CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
+            id TEXT PRIMARY KEY,
+            client_id TEXT NOT NULL UNIQUE,
+            client_secret_hash TEXT NOT NULL,
+            client_name TEXT,
+            redirect_uris TEXT NOT NULL,
+            grant_types TEXT NOT NULL,
+            token_endpoint_auth_method TEXT NOT NULL DEFAULT 'client_secret_post',
+            created_at TEXT NOT NULL
+        );
+    "#,
+    ),
 ];
 
 pub struct PlatformStore {

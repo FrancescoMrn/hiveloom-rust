@@ -354,6 +354,19 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
         ALTER TABLE conversations ADD COLUMN raw_turns_archived INTEGER DEFAULT 0;
     "#,
     ),
+    (
+        "0021_add_agent_id_to_mcp_identities",
+        r#"
+        ALTER TABLE mcp_identities ADD COLUMN agent_id TEXT;
+    "#,
+    ),
+    (
+        "0022_add_oauth_fields_to_mcp_client_registrations",
+        // SQLite requires separate ALTER TABLE statements for each column
+        "ALTER TABLE mcp_client_registrations ADD COLUMN code_challenge TEXT;
+         ALTER TABLE mcp_client_registrations ADD COLUMN code_challenge_method TEXT;
+         ALTER TABLE mcp_client_registrations ADD COLUMN redirect_uri TEXT;",
+    ),
 ];
 
 pub struct TenantStore {

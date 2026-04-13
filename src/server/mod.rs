@@ -77,26 +77,27 @@ pub fn create_router(state: AppState) -> Router {
             "/mcp/:tenant_slug/:agent_slug",
             axum::routing::post(mcp::transport::handle_mcp_request),
         )
-        // ── MCP OAuth AS metadata (T085) ───────────────────────────────
+        // ── OAuth Discovery (T085) ────────────────────────────────────
         .route(
             "/.well-known/oauth-authorization-server",
             axum::routing::get(mcp::auth::oauth_metadata),
         )
         .route(
-            "/mcp/:tenant_slug/.well-known/oauth-protected-resource",
+            "/mcp/:tenant_slug/:agent_slug/.well-known/oauth-protected-resource",
             axum::routing::get(mcp::auth::protected_resource_metadata),
         )
-        // ── MCP OAuth AS endpoints (T086-T088) ────────────────────────
+        // ── OAuth Endpoints (spec-compliant) ──────────────────────────
         .route(
-            "/mcp/authorize",
-            axum::routing::get(mcp::auth::authorize),
+            "/oauth/register",
+            axum::routing::post(mcp::auth::register_client),
         )
         .route(
-            "/mcp/authorize",
-            axum::routing::post(mcp::auth::authorize_submit),
+            "/oauth/authorize",
+            axum::routing::get(mcp::auth::authorize)
+                .post(mcp::auth::authorize_submit),
         )
         .route(
-            "/mcp/token",
+            "/oauth/token",
             axum::routing::post(mcp::auth::token),
         )
         .with_state(shared_state)

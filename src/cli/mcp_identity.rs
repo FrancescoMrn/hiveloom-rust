@@ -30,12 +30,18 @@ pub enum McpIdentityCommand {
         /// Name for the MCP identity
         #[arg(long)]
         name: String,
+        /// Agent slug or UUID to bind this identity to (optional)
+        #[arg(long)]
+        agent: Option<String>,
     },
     /// List MCP identities for a tenant
     List {
         /// Tenant ID
         #[arg(long)]
         tenant: String,
+        /// Filter by agent slug or UUID
+        #[arg(long)]
+        agent: Option<String>,
     },
     /// Show details of an MCP identity
     Show {
@@ -86,17 +92,26 @@ pub async fn run(args: McpIdentityArgs) -> anyhow::Result<()> {
     let client = ApiClient::new(args.endpoint.clone(), args.token.clone());
 
     match args.command {
-        McpIdentityCommand::Create { tenant, name } => {
-            let body = serde_json::json!({ "name": name });
+        McpIdentityCommand::Create {
+            tenant,
+            name,
+            agent,
+        } => {
+            let mut body = serde_json::json!({ "name": name });
+            if let Some(ref agent_id) = agent {
+                body["agent_id"] = serde_json::Value::String(agent_id.clone());
+            }
             let result: serde_json::Value = client
                 .post(&format!("/api/tenants/{}/mcp-identities", tenant), &body)
                 .await?;
             println!("{}", serde_json::to_string_pretty(&result)?);
         }
-        McpIdentityCommand::List { tenant } => {
-            let result: serde_json::Value = client
-                .get(&format!("/api/tenants/{}/mcp-identities", tenant))
-                .await?;
+        McpIdentityCommand::List { tenant, agent } => {
+            let url = match &agent {
+                Some(a) => format!("/api/tenants/{}/mcp-identities?agent={}", tenant, a),
+                None => format!("/api/tenants/{}/mcp-identities", tenant),
+            };
+            let result: serde_json::Value = client.get(&url).await?;
             println!("{}", serde_json::to_string_pretty(&result)?);
         }
         McpIdentityCommand::Show { id, tenant } => {

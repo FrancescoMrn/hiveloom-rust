@@ -11,9 +11,11 @@ pub struct McpIdentity {
     pub status: String,
     pub created_at: String,
     pub updated_at: String,
+    pub agent_id: Option<Uuid>,
 }
 
-const SELECT_COLS: &str = "id, tenant_id, name, mapped_person_id, status, created_at, updated_at";
+const SELECT_COLS: &str =
+    "id, tenant_id, name, mapped_person_id, status, created_at, updated_at, agent_id";
 
 fn row_to_mcp_identity(row: &rusqlite::Row) -> rusqlite::Result<McpIdentity> {
     Ok(McpIdentity {
@@ -24,11 +26,19 @@ fn row_to_mcp_identity(row: &rusqlite::Row) -> rusqlite::Result<McpIdentity> {
         status: row.get(4)?,
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
+        agent_id: row
+            .get::<_, Option<String>>(7)?
+            .and_then(|s| s.parse().ok()),
     })
 }
 
 impl McpIdentity {
-    pub fn create(conn: &Connection, tenant_id: Uuid, name: &str) -> Result<McpIdentity> {
+    pub fn create(
+        conn: &Connection,
+        tenant_id: Uuid,
+        name: &str,
+        agent_id: Option<Uuid>,
+    ) -> Result<McpIdentity> {
         let id = Uuid::new_v4();
         let now = chrono::Utc::now().to_rfc3339();
         let entry = McpIdentity {
@@ -39,10 +49,11 @@ impl McpIdentity {
             status: "active".to_string(),
             created_at: now.clone(),
             updated_at: now,
+            agent_id,
         };
         conn.execute(
-            "INSERT INTO mcp_identities (id, tenant_id, name, mapped_person_id, status, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO mcp_identities (id, tenant_id, name, mapped_person_id, status, created_at, updated_at, agent_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 entry.id.to_string(),
                 entry.tenant_id.to_string(),
@@ -51,6 +62,7 @@ impl McpIdentity {
                 entry.status,
                 entry.created_at,
                 entry.updated_at,
+                entry.agent_id.map(|a| a.to_string()),
             ],
         )?;
         Ok(entry)
@@ -109,6 +121,27 @@ impl McpIdentity {
 
     pub fn revoke(conn: &Connection, id: Uuid) -> Result<()> {
         Self::update_status(conn, id, "revoked")
+    }
+
+    pub fn list_by_agent(
+        conn: &Connection,
+        tenant_id: Uuid,
+        agent_id: Uuid,
+    ) -> Result<Vec<McpIdentity>> {
+        let sql = format!(
+            "SELECT {} FROM mcp_identities WHERE tenant_id = ?1 AND agent_id = ?2 ORDER BY created_at",
+            SELECT_COLS
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            params![tenant_id.to_string(), agent_id.to_string()],
+            row_to_mcp_identity,
+        )?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
     }
 
     pub fn delete(conn: &Connection, id: Uuid) -> Result<()> {

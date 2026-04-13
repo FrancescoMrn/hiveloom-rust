@@ -146,6 +146,14 @@ fn handle_mcp_sync(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
+    // Enforce agent binding: if the identity is bound to a specific agent,
+    // the URL must match that agent
+    if let Some(bound_agent_id) = session.identity.agent_id {
+        if bound_agent_id != agent.id {
+            return Err(StatusCode::FORBIDDEN);
+        }
+    }
+
     // Dispatch based on method
     let response = match rpc_req.method.as_str() {
         "initialize" => handle_initialize(&agent, rpc_req.id.clone()),

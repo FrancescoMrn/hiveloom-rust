@@ -7,7 +7,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 
 use crate::server::oauth::server as oauth_server;
-use crate::store::models::{McpClientRegistration, McpIdentity, McpSetupCode};
+use crate::store::models::{Agent, McpClientRegistration, McpIdentity, McpSetupCode};
 
 fn err_json(status: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
     (status, Json(serde_json::json!({ "error": msg })))
@@ -18,6 +18,7 @@ fn err_json(status: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Valu
 #[derive(Deserialize)]
 pub struct CreateMcpIdentityRequest {
     pub name: String,
+    pub agent_id: Option<String>,
 }
 
 pub async fn create_mcp_identity(
@@ -38,7 +39,49 @@ pub async fn create_mcp_identity(
     };
     let conn = tenant_store.conn();
 
-    match McpIdentity::create(conn, tenant_id, &body.name) {
+    // Resolve agent_id if provided (accepts UUID or slug)
+    let agent_id = match &body.agent_id {
+        Some(agent_ref) => {
+            // Try parsing as UUID first
+            if let Ok(uid) = agent_ref.parse::<uuid::Uuid>() {
+                // Verify agent exists
+                match Agent::list_current(conn, tenant_id) {
+                    Ok(agents) if agents.iter().any(|a| a.id == uid) => Some(uid),
+                    Ok(_) => {
+                        return err_json(StatusCode::NOT_FOUND, "Agent not found").into_response()
+                    }
+                    Err(e) => {
+                        return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())
+                            .into_response()
+                    }
+                }
+            } else {
+                // Try as slug
+                let slug = agent_ref.to_lowercase().replace(' ', "-");
+                match Agent::list_current(conn, tenant_id) {
+                    Ok(agents) => {
+                        match agents.iter().find(|a| {
+                            a.name.to_lowercase().replace(' ', "-") == slug
+                                || a.name.to_lowercase() == agent_ref.to_lowercase()
+                        }) {
+                            Some(agent) => Some(agent.id),
+                            None => {
+                                return err_json(StatusCode::NOT_FOUND, "Agent not found")
+                                    .into_response()
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())
+                            .into_response()
+                    }
+                }
+            }
+        }
+        None => None,
+    };
+
+    match McpIdentity::create(conn, tenant_id, &body.name, agent_id) {
         Ok(identity) => (
             StatusCode::CREATED,
             Json(serde_json::to_value(identity).unwrap()),
@@ -48,9 +91,15 @@ pub async fn create_mcp_identity(
     }
 }
 
+#[derive(Deserialize, Default)]
+pub struct ListMcpIdentitiesQuery {
+    pub agent: Option<String>,
+}
+
 pub async fn list_mcp_identities(
     State(state): State<Arc<crate::server::AppState>>,
     Path(tid_str): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<ListMcpIdentitiesQuery>,
 ) -> impl IntoResponse {
     let tenant_id = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
         Ok(id) => id,
@@ -64,6 +113,41 @@ pub async fn list_mcp_identities(
         }
     };
     let conn = tenant_store.conn();
+
+    // If agent filter provided, resolve to UUID and use list_by_agent
+    if let Some(agent_ref) = &query.agent {
+        let agent_id = if let Ok(uid) = agent_ref.parse::<uuid::Uuid>() {
+            uid
+        } else {
+            let slug = agent_ref.to_lowercase().replace(' ', "-");
+            match Agent::list_current(conn, tenant_id) {
+                Ok(agents) => {
+                    match agents.iter().find(|a| {
+                        a.name.to_lowercase().replace(' ', "-") == slug
+                            || a.name.to_lowercase() == agent_ref.to_lowercase()
+                    }) {
+                        Some(agent) => agent.id,
+                        None => {
+                            return err_json(StatusCode::NOT_FOUND, "Agent not found")
+                                .into_response()
+                        }
+                    }
+                }
+                Err(e) => {
+                    return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())
+                        .into_response()
+                }
+            }
+        };
+        match McpIdentity::list_by_agent(conn, tenant_id, agent_id) {
+            Ok(identities) => {
+                return Json(serde_json::to_value(identities).unwrap()).into_response()
+            }
+            Err(e) => {
+                return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
+            }
+        }
+    }
 
     match McpIdentity::list(conn, tenant_id) {
         Ok(identities) => Json(serde_json::to_value(identities).unwrap()).into_response(),

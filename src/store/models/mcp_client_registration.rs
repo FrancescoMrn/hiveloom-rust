@@ -13,11 +13,14 @@ pub struct McpClientRegistration {
     pub token_expires_at: Option<String>,
     pub created_at: String,
     pub revoked_at: Option<String>,
+    pub code_challenge: Option<String>,
+    pub code_challenge_method: Option<String>,
+    pub redirect_uri: Option<String>,
 }
 
 const SELECT_COLS: &str =
     "id, tenant_id, mcp_identity_id, client_id, access_token_hash, refresh_token_hash, \
-     token_expires_at, created_at, revoked_at";
+     token_expires_at, created_at, revoked_at, code_challenge, code_challenge_method, redirect_uri";
 
 fn row_to_registration(row: &rusqlite::Row) -> rusqlite::Result<McpClientRegistration> {
     Ok(McpClientRegistration {
@@ -30,6 +33,9 @@ fn row_to_registration(row: &rusqlite::Row) -> rusqlite::Result<McpClientRegistr
         token_expires_at: row.get(6)?,
         created_at: row.get(7)?,
         revoked_at: row.get(8)?,
+        code_challenge: row.get(9)?,
+        code_challenge_method: row.get(10)?,
+        redirect_uri: row.get(11)?,
     })
 }
 
@@ -43,6 +49,9 @@ impl McpClientRegistration {
         access_token_hash: &str,
         refresh_token_hash: Option<&str>,
         token_expires_at: Option<&str>,
+        code_challenge: Option<&str>,
+        code_challenge_method: Option<&str>,
+        redirect_uri: Option<&str>,
     ) -> Result<McpClientRegistration> {
         let id = Uuid::new_v4();
         let now = chrono::Utc::now().to_rfc3339();
@@ -56,12 +65,16 @@ impl McpClientRegistration {
             token_expires_at: token_expires_at.map(|s| s.to_string()),
             created_at: now,
             revoked_at: None,
+            code_challenge: code_challenge.map(|s| s.to_string()),
+            code_challenge_method: code_challenge_method.map(|s| s.to_string()),
+            redirect_uri: redirect_uri.map(|s| s.to_string()),
         };
         conn.execute(
             "INSERT INTO mcp_client_registrations
              (id, tenant_id, mcp_identity_id, client_id, access_token_hash,
-              refresh_token_hash, token_expires_at, created_at, revoked_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+              refresh_token_hash, token_expires_at, created_at, revoked_at,
+              code_challenge, code_challenge_method, redirect_uri)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 entry.id.to_string(),
                 entry.tenant_id.to_string(),
@@ -72,6 +85,9 @@ impl McpClientRegistration {
                 entry.token_expires_at,
                 entry.created_at,
                 entry.revoked_at,
+                entry.code_challenge,
+                entry.code_challenge_method,
+                entry.redirect_uri,
             ],
         )?;
         Ok(entry)
@@ -117,6 +133,23 @@ impl McpClientRegistration {
         );
         let mut stmt = conn.prepare(&sql)?;
         let mut rows = stmt.query_map(params![access_token_hash], row_to_registration)?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_by_refresh_token_hash(
+        conn: &Connection,
+        refresh_token_hash: &str,
+    ) -> Result<Option<McpClientRegistration>> {
+        let sql = format!(
+            "SELECT {} FROM mcp_client_registrations
+             WHERE refresh_token_hash = ?1 AND revoked_at IS NULL",
+            SELECT_COLS
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let mut rows = stmt.query_map(params![refresh_token_hash], row_to_registration)?;
         match rows.next() {
             Some(row) => Ok(Some(row?)),
             None => Ok(None),
