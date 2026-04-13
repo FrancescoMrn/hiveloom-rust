@@ -1,0 +1,1 @@
+// MCP auth stub

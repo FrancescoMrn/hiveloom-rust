@@ -1,0 +1,28 @@
+# Rust build artifacts
+target/
+*.rs.bk
+*.rlib
+*.prof*
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Environment
+.env*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Data directory (runtime)
+/data/
+
+# Temporary
+*.tmp
+*.swp

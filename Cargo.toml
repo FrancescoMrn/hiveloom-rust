@@ -1,0 +1,86 @@
+[package]
+name = "hiveloom"
+version = "0.1.0"
+edition = "2021"
+description = "Multi-tenant AI agent platform"
+license = "Apache-2.0"
+default-run = "hiveloom"
+
+[[bin]]
+name = "hiveloom"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP framework
+axum = { version = "0.7", features = ["macros", "ws"] }
+tower = { version = "0.4" }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled", "trace"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# TUI
+ratatui = "0.26"
+crossterm = "0.27"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# OAuth
+oauth2 = "4"
+
+# Encryption
+aes-gcm = "0.10"
+rand = "0.8"
+
+# Time & scheduling
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.9"
+cron = "0.12"
+
+# Token counting
+tiktoken-rs = "0.5"
+
+# Identity
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Hashing
+sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Async utilities
+futures = "0.3"
+async-trait = "0.1"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Terminal detection
+atty = "0.2"
+
+# URL handling
+url = "2"
+
+# Base64
+base64 = "0.22"
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3"
