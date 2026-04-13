@@ -50,11 +50,7 @@ pub fn write_memory(
             } else {
                 // User-scoped write, need to handle based on coerce policy
                 match agent.scope_coerce_policy.as_str() {
-                    "coerce" => (
-                        "tenant".to_string(),
-                        true,
-                        Some(requested_scope),
-                    ),
+                    "coerce" => ("tenant".to_string(), true, Some(requested_scope)),
                     "drop" => return Ok(()), // silently drop
                     _ => return Ok(()),
                 }

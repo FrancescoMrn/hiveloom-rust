@@ -6,7 +6,9 @@ use crate::store::migrations::run_migrations;
 
 /// Migrations applied to every platform database.
 const PLATFORM_MIGRATIONS: &[(&str, &str)] = &[
-    ("0001_create_tenants", r#"
+    (
+        "0001_create_tenants",
+        r#"
         CREATE TABLE IF NOT EXISTS tenants (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -16,16 +18,22 @@ const PLATFORM_MIGRATIONS: &[(&str, &str)] = &[
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
-    "#),
-    ("0002_create_routing_assignments", r#"
+    "#,
+    ),
+    (
+        "0002_create_routing_assignments",
+        r#"
         CREATE TABLE IF NOT EXISTS routing_assignments (
             tenant_id TEXT NOT NULL REFERENCES tenants(id),
             instance_id TEXT NOT NULL,
             assigned_at TEXT NOT NULL,
             PRIMARY KEY (tenant_id)
         );
-    "#),
-    ("0003_create_platform_admin_tokens", r#"
+    "#,
+    ),
+    (
+        "0003_create_platform_admin_tokens",
+        r#"
         CREATE TABLE IF NOT EXISTS platform_admin_tokens (
             id TEXT PRIMARY KEY,
             token_hash TEXT NOT NULL UNIQUE,
@@ -34,7 +42,8 @@ const PLATFORM_MIGRATIONS: &[(&str, &str)] = &[
             expires_at TEXT,
             revoked_at TEXT
         );
-    "#),
+    "#,
+    ),
 ];
 
 pub struct PlatformStore {
@@ -49,7 +58,9 @@ impl PlatformStore {
         let conn = Connection::open(&db_path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         run_migrations(&conn, PLATFORM_MIGRATIONS)?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     /// Acquire a lock on the platform database connection.

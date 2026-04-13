@@ -10,7 +10,7 @@ pub struct ApplyArgs {
     pub file: String,
 
     /// Tenant slug (default: "default")
-    #[arg(long, default_value = "default")]
+    #[arg(long, default_value_t = crate::cli::local::default_tenant())]
     pub tenant: String,
 
     /// API endpoint
@@ -142,10 +142,7 @@ pub async fn run(args: ApplyArgs) -> anyhow::Result<()> {
             // Update
             let agent_id = &existing_by_name[&entry.name].id;
             match client
-                .put::<_, AgentResponse>(
-                    &format!("/api/tenants/{tid}/agents/{agent_id}"),
-                    &body,
-                )
+                .put::<_, AgentResponse>(&format!("/api/tenants/{tid}/agents/{agent_id}"), &body)
                 .await
             {
                 Ok(a) => summary.updated.push(format!("{} (v{})", a.name, a.version)),
@@ -154,10 +151,7 @@ pub async fn run(args: ApplyArgs) -> anyhow::Result<()> {
         } else {
             // Create
             match client
-                .post::<_, AgentResponse>(
-                    &format!("/api/tenants/{tid}/agents"),
-                    &body,
-                )
+                .post::<_, AgentResponse>(&format!("/api/tenants/{tid}/agents"), &body)
                 .await
             {
                 Ok(a) => summary.created.push(a.name),

@@ -10,7 +10,7 @@ pub struct CredentialArgs {
     pub command: CredentialCommand,
 
     /// Tenant slug (default: "default")
-    #[arg(long, default_value = "default", global = true)]
+    #[arg(long, default_value_t = crate::cli::local::default_tenant(), global = true)]
     pub tenant: String,
 
     /// API endpoint
@@ -80,8 +80,7 @@ struct CredentialInfo {
 /// IMPORTANT: The secret is never accepted as a visible CLI flag value (FR-048).
 fn read_secret(from_env: &Option<String>, from_file: &Option<String>) -> anyhow::Result<String> {
     if let Some(var) = from_env {
-        std::env::var(var)
-            .map_err(|_| anyhow::anyhow!("environment variable '{}' is not set", var))
+        std::env::var(var).map_err(|_| anyhow::anyhow!("environment variable '{}' is not set", var))
     } else if let Some(path) = from_file {
         std::fs::read_to_string(path)
             .map(|s| s.trim_end().to_string())
@@ -115,8 +114,9 @@ pub async fn run(args: CredentialArgs) -> anyhow::Result<()> {
                 "kind": kind,
                 "value": secret,
             });
-            let cred: CredentialInfo =
-                client.post(&format!("/api/tenants/{tid}/credentials"), &body).await?;
+            let cred: CredentialInfo = client
+                .post(&format!("/api/tenants/{tid}/credentials"), &body)
+                .await?;
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&cred)?);
             } else {
@@ -124,8 +124,9 @@ pub async fn run(args: CredentialArgs) -> anyhow::Result<()> {
             }
         }
         CredentialCommand::List => {
-            let creds: Vec<CredentialInfo> =
-                client.get(&format!("/api/tenants/{tid}/credentials")).await?;
+            let creds: Vec<CredentialInfo> = client
+                .get(&format!("/api/tenants/{tid}/credentials"))
+                .await?;
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&creds)?);
             } else {

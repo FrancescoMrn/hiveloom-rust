@@ -9,7 +9,7 @@ pub struct CapabilityArgs {
     pub command: CapabilityCommand,
 
     /// Tenant slug (default: "default")
-    #[arg(long, default_value = "default", global = true)]
+    #[arg(long, default_value_t = crate::cli::local::default_tenant(), global = true)]
     pub tenant: String,
 
     /// API endpoint
@@ -40,7 +40,7 @@ pub enum CapabilityCommand {
         /// Endpoint URL the capability calls
         #[arg(long)]
         cap_endpoint: String,
-        /// Auth type (none | bearer | oauth2)
+        /// Auth type (none | api_key | oauth)
         #[arg(long, default_value = "none")]
         auth_type: String,
         /// Credential reference name
@@ -136,9 +136,7 @@ pub async fn run(args: CapabilityArgs) -> anyhow::Result<()> {
         }
         CapabilityCommand::List { agent } => {
             let caps: Vec<CapabilityResponse> = client
-                .get(&format!(
-                    "/api/tenants/{tid}/agents/{agent}/capabilities"
-                ))
+                .get(&format!("/api/tenants/{tid}/agents/{agent}/capabilities"))
                 .await?;
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&caps)?);

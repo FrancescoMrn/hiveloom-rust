@@ -68,10 +68,7 @@ struct JobSummary {
 
 async fn fetch_dashboard(client: &ApiClient) -> DashboardData {
     // Best-effort fetches; failures yield defaults
-    let healthy = client
-        .get::<serde_json::Value>("/healthz")
-        .await
-        .is_ok();
+    let healthy = client.get::<serde_json::Value>("/healthz").await.is_ok();
 
     // We cannot enumerate all tenants' agents from a single API call easily;
     // fetch from "default" tenant as representative overview.
@@ -142,7 +139,7 @@ fn render_dashboard(f: &mut ratatui::Frame, data: &DashboardData) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Title
+            Constraint::Length(3), // Title
             Constraint::Min(8),    // Agents
             Constraint::Length(5), // Stats
             Constraint::Length(3), // Footer
@@ -155,13 +152,31 @@ fn render_dashboard(f: &mut ratatui::Frame, data: &DashboardData) {
         " hiveloom top  |  Health: {}  |  Press 'q' to quit",
         health_indicator
     ))
-    .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-    .block(Block::default().borders(Borders::ALL).title("Hiveloom Dashboard"));
+    .style(
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Hiveloom Dashboard"),
+    );
     f.render_widget(title, chunks[0]);
 
     // Agents table (T026: compaction counters, T038: fallback warning)
-    let header = Row::new(vec!["NAME", "STATUS", "COMPACTIONS", "LAST COMPACTED", "ID"])
-        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+    let header = Row::new(vec![
+        "NAME",
+        "STATUS",
+        "COMPACTIONS",
+        "LAST COMPACTED",
+        "ID",
+    ])
+    .style(
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    );
     let rows: Vec<Row> = data
         .agents
         .iter()
@@ -181,7 +196,10 @@ fn render_dashboard(f: &mut ratatui::Frame, data: &DashboardData) {
             } else {
                 Style::default()
             };
-            let last_compacted = a.last_compacted.clone().unwrap_or_else(|| "never".to_string());
+            let last_compacted = a
+                .last_compacted
+                .clone()
+                .unwrap_or_else(|| "never".to_string());
             Row::new(vec![
                 Cell::from(a.name.clone()),
                 Cell::from(a.status.clone()).style(status_style),
@@ -202,7 +220,11 @@ fn render_dashboard(f: &mut ratatui::Frame, data: &DashboardData) {
         ],
     )
     .header(header)
-    .block(Block::default().borders(Borders::ALL).title("Active Agents"));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Active Agents"),
+    );
     f.render_widget(agents_table, chunks[1]);
 
     // Stats bar

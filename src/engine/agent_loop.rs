@@ -114,10 +114,8 @@ pub async fn run_agent_loop(
                 tool_calls_made.push(tc.name.clone());
 
                 // Find the matching capability and execute it
-                let result = if let Some(cap) = invocation
-                    .capabilities
-                    .iter()
-                    .find(|c| c.name == tc.name)
+                let result = if let Some(cap) =
+                    invocation.capabilities.iter().find(|c| c.name == tc.name)
                 {
                     serde_json::json!({
                         "result": format!("Tool {} called (capability execution requires vault context)", tc.name),
@@ -160,7 +158,8 @@ pub async fn run_agent_loop(
 
         if let Some(content) = &response.content {
             // T032: Inject compaction indicator if applicable
-            let final_response = CompactionIndicator::inject_indicator(content, &compaction_outcome);
+            let final_response =
+                CompactionIndicator::inject_indicator(content, &compaction_outcome);
             ConversationTurn::append(
                 conn,
                 invocation.conversation_id,
@@ -279,25 +278,22 @@ pub async fn run_agent_loop_with_vault(
             for tc in &response.tool_calls {
                 tool_calls_made.push(tc.name.clone());
 
-                let result = if let Some(cap) = invocation
-                    .capabilities
-                    .iter()
-                    .find(|c| c.name == tc.name)
-                {
-                    let exec_result = crate::engine::capability_exec::execute_capability(
-                        conn,
-                        cap,
-                        &tc.arguments,
-                        &invocation.tenant_id,
-                        &invocation.agent.id,
-                        &invocation.conversation_id,
-                        vault,
-                    )
-                    .await?;
-                    serde_json::to_string(&exec_result)?
-                } else {
-                    format!("{{\"error\": \"unknown tool: {}\"}}", tc.name)
-                };
+                let result =
+                    if let Some(cap) = invocation.capabilities.iter().find(|c| c.name == tc.name) {
+                        let exec_result = crate::engine::capability_exec::execute_capability(
+                            conn,
+                            cap,
+                            &tc.arguments,
+                            &invocation.tenant_id,
+                            &invocation.agent.id,
+                            &invocation.conversation_id,
+                            vault,
+                        )
+                        .await?;
+                        serde_json::to_string(&exec_result)?
+                    } else {
+                        format!("{{\"error\": \"unknown tool: {}\"}}", tc.name)
+                    };
 
                 ConversationTurn::append(
                     conn,
@@ -330,7 +326,8 @@ pub async fn run_agent_loop_with_vault(
 
         if let Some(content) = &response.content {
             // T032: Inject compaction indicator if applicable
-            let final_response = CompactionIndicator::inject_indicator(content, &compaction_outcome);
+            let final_response =
+                CompactionIndicator::inject_indicator(content, &compaction_outcome);
             ConversationTurn::append(
                 conn,
                 invocation.conversation_id,

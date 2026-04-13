@@ -13,8 +13,7 @@ pub struct McpIdentity {
     pub updated_at: String,
 }
 
-const SELECT_COLS: &str =
-    "id, tenant_id, name, mapped_person_id, status, created_at, updated_at";
+const SELECT_COLS: &str = "id, tenant_id, name, mapped_person_id, status, created_at, updated_at";
 
 fn row_to_mcp_identity(row: &rusqlite::Row) -> rusqlite::Result<McpIdentity> {
     Ok(McpIdentity {
@@ -29,11 +28,7 @@ fn row_to_mcp_identity(row: &rusqlite::Row) -> rusqlite::Result<McpIdentity> {
 }
 
 impl McpIdentity {
-    pub fn create(
-        conn: &Connection,
-        tenant_id: Uuid,
-        name: &str,
-    ) -> Result<McpIdentity> {
+    pub fn create(conn: &Connection, tenant_id: Uuid, name: &str) -> Result<McpIdentity> {
         let id = Uuid::new_v4();
         let now = chrono::Utc::now().to_rfc3339();
         let entry = McpIdentity {

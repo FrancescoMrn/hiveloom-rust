@@ -9,7 +9,7 @@ pub struct ScheduleArgs {
     pub command: ScheduleCommand,
 
     /// Tenant slug (default: "default")
-    #[arg(long, default_value = "default", global = true)]
+    #[arg(long, default_value_t = crate::cli::local::default_tenant(), global = true)]
     pub tenant: String,
 
     /// API endpoint
@@ -31,7 +31,7 @@ pub enum ScheduleCommand {
     Create {
         /// Agent ID
         agent: String,
-        /// Cron expression (e.g. "0 0 * * * *" for every hour)
+        /// Cron expression (5-field standard cron or 6-field cron with seconds)
         #[arg(long)]
         cron: Option<String>,
         /// One-time fire at (RFC3339 datetime)
@@ -136,9 +136,7 @@ pub async fn run(args: ScheduleArgs) -> anyhow::Result<()> {
         }
         ScheduleCommand::List { agent } => {
             let jobs: Vec<ScheduledJobResponse> = client
-                .get(&format!(
-                    "/api/tenants/{tid}/agents/{agent}/scheduled-jobs"
-                ))
+                .get(&format!("/api/tenants/{tid}/agents/{agent}/scheduled-jobs"))
                 .await?;
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&jobs)?);
@@ -172,12 +170,18 @@ pub async fn run(args: ScheduleArgs) -> anyhow::Result<()> {
                 println!("Job ID:       {}", j.id);
                 println!("Agent:        {}", j.agent_id);
                 println!("Tenant:       {}", j.tenant_id);
-                println!("Cron:         {}", j.cron_expression.as_deref().unwrap_or("-"));
+                println!(
+                    "Cron:         {}",
+                    j.cron_expression.as_deref().unwrap_or("-")
+                );
                 println!("One-time at:  {}", j.one_time_at.as_deref().unwrap_or("-"));
                 println!("Timezone:     {}", j.timezone);
                 println!("Status:       {}", j.status);
                 println!("Next fire:    {}", j.next_fire_at.as_deref().unwrap_or("-"));
-                println!("Last fired:   {}", j.last_fired_at.as_deref().unwrap_or("-"));
+                println!(
+                    "Last fired:   {}",
+                    j.last_fired_at.as_deref().unwrap_or("-")
+                );
                 println!("Created:      {}", j.created_at);
                 if !j.initial_context.is_empty() {
                     println!("Context:");
@@ -210,7 +214,11 @@ pub async fn run(args: ScheduleArgs) -> anyhow::Result<()> {
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&j)?);
             } else {
-                println!("Resumed job {} (next fire: {})", j.id, j.next_fire_at.as_deref().unwrap_or("-"));
+                println!(
+                    "Resumed job {} (next fire: {})",
+                    j.id,
+                    j.next_fire_at.as_deref().unwrap_or("-")
+                );
             }
         }
         ScheduleCommand::Delete { agent, job } => {

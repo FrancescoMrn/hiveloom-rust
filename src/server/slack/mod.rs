@@ -61,8 +61,8 @@ pub async fn handle_event(
     }
 
     // Parse JSON body
-    let payload: serde_json::Value = serde_json::from_slice(&body)
-        .map_err(|_| axum::http::StatusCode::BAD_REQUEST)?;
+    let payload: serde_json::Value =
+        serde_json::from_slice(&body).map_err(|_| axum::http::StatusCode::BAD_REQUEST)?;
 
     let event_type = payload
         .get("type")

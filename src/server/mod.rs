@@ -64,7 +64,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/healthz", axum::routing::get(healthz::handler))
         .route("/slack/events", axum::routing::post(slack::handle_event))
         .route(
-            "/events/{tid}/inbound",
+            "/events/:tid/inbound",
             axum::routing::post(events::handle_inbound_event),
         )
         // ── OAuth callback (T075) ──────────────────────────────────────

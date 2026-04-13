@@ -37,12 +37,27 @@ pub struct UpdateScheduledJobRequest {
 
 pub async fn create_scheduled_job(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, aid)): Path<(uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str)): Path<(String, String)>,
     Json(body): Json<CreateScheduledJobRequest>,
 ) -> impl IntoResponse {
+    if body.cron_expression.is_some() == body.one_time_at.is_some() {
+        return err_json(
+            StatusCode::BAD_REQUEST,
+            "Provide exactly one of 'cron_expression' or 'one_time_at'",
+        );
+    }
+
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
 
@@ -53,7 +68,16 @@ pub async fn create_scheduled_job(
             Err(e) => return err_json(StatusCode::BAD_REQUEST, &e.to_string()),
         }
     } else {
-        body.one_time_at.clone()
+        let one_time = body.one_time_at.clone().unwrap_or_default();
+        match chrono::DateTime::parse_from_rfc3339(&one_time) {
+            Ok(ts) => Some(ts.with_timezone(&chrono::Utc).to_rfc3339()),
+            Err(e) => {
+                return err_json(
+                    StatusCode::BAD_REQUEST,
+                    &format!("Invalid RFC3339 datetime '{}': {}", one_time, e),
+                )
+            }
+        }
     };
 
     match ScheduledJob::create(
@@ -66,18 +90,29 @@ pub async fn create_scheduled_job(
         &body.initial_context,
         next_fire_at.as_deref(),
     ) {
-        Ok(job) => (StatusCode::CREATED, Json(serde_json::to_value(job).unwrap())),
+        Ok(job) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(job).unwrap()),
+        ),
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
 pub async fn list_scheduled_jobs(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, aid)): Path<(uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
     match ScheduledJob::list_by_agent(conn, tid, aid) {
@@ -88,11 +123,19 @@ pub async fn list_scheduled_jobs(
 
 pub async fn get_scheduled_job(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, _aid, jid)): Path<(uuid::Uuid, uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str, jid)): Path<(String, String, uuid::Uuid)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let _aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
     match ScheduledJob::get(conn, jid) {
@@ -104,12 +147,20 @@ pub async fn get_scheduled_job(
 
 pub async fn update_scheduled_job(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, _aid, jid)): Path<(uuid::Uuid, uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str, jid)): Path<(String, String, uuid::Uuid)>,
     Json(body): Json<UpdateScheduledJobRequest>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let _aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
 
@@ -120,7 +171,10 @@ pub async fn update_scheduled_job(
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     };
 
-    let cron_expr = body.cron_expression.as_deref().or(existing.cron_expression.as_deref());
+    let cron_expr = body
+        .cron_expression
+        .as_deref()
+        .or(existing.cron_expression.as_deref());
     let tz = body.timezone.as_deref().unwrap_or(&existing.timezone);
 
     // Recompute next_fire_at if cron changed
@@ -151,17 +205,28 @@ pub async fn update_scheduled_job(
 
     match ScheduledJob::get(conn, jid) {
         Ok(Some(job)) => (StatusCode::OK, Json(serde_json::to_value(job).unwrap())),
-        _ => err_json(StatusCode::NOT_FOUND, "Scheduled job not found after update"),
+        _ => err_json(
+            StatusCode::NOT_FOUND,
+            "Scheduled job not found after update",
+        ),
     }
 }
 
 pub async fn delete_scheduled_job(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, _aid, jid)): Path<(uuid::Uuid, uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str, jid)): Path<(String, String, uuid::Uuid)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let _aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
     match ScheduledJob::delete(conn, jid) {
@@ -172,31 +237,45 @@ pub async fn delete_scheduled_job(
 
 pub async fn pause_scheduled_job(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, _aid, jid)): Path<(uuid::Uuid, uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str, jid)): Path<(String, String, uuid::Uuid)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     };
+    let _aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let conn = tenant_store.conn();
     match ScheduledJob::pause(conn, jid) {
-        Ok(()) => {
-            match ScheduledJob::get(conn, jid) {
-                Ok(Some(job)) => (StatusCode::OK, Json(serde_json::to_value(job).unwrap())),
-                _ => err_json(StatusCode::NOT_FOUND, "Scheduled job not found"),
-            }
-        }
+        Ok(()) => match ScheduledJob::get(conn, jid) {
+            Ok(Some(job)) => (StatusCode::OK, Json(serde_json::to_value(job).unwrap())),
+            _ => err_json(StatusCode::NOT_FOUND, "Scheduled job not found"),
+        },
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
 pub async fn resume_scheduled_job(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, _aid, jid)): Path<(uuid::Uuid, uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str, jid)): Path<(String, String, uuid::Uuid)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let _aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
     match ScheduledJob::resume(conn, jid) {
@@ -204,7 +283,9 @@ pub async fn resume_scheduled_job(
             // Recompute next_fire_at
             if let Ok(Some(job)) = ScheduledJob::get(conn, jid) {
                 if let Some(ref cron_expr) = job.cron_expression {
-                    if let Ok(next) = compute_next_fire(cron_expr, &job.timezone, chrono::Utc::now()) {
+                    if let Ok(next) =
+                        compute_next_fire(cron_expr, &job.timezone, chrono::Utc::now())
+                    {
                         let next_str = next.to_rfc3339();
                         let _ = ScheduledJob::update_next_fire(conn, jid, Some(&next_str));
                     }

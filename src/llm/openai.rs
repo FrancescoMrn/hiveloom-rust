@@ -1,4 +1,6 @@
-use crate::llm::provider::{LlmProvider, LlmResponse, Message, TokenUsage, ToolCall, ToolDefinition};
+use crate::llm::provider::{
+    LlmProvider, LlmResponse, Message, TokenUsage, ToolCall, ToolDefinition,
+};
 use serde_json::json;
 use tiktoken_rs::cl100k_base;
 
@@ -107,19 +109,14 @@ impl LlmProvider for OpenAiProvider {
                     serde_json::from_str(arguments_str).unwrap_or(json!({}));
                 tool_calls.push(ToolCall {
                     id: call["id"].as_str().unwrap_or_default().to_string(),
-                    name: function["name"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string(),
+                    name: function["name"].as_str().unwrap_or_default().to_string(),
                     arguments,
                 });
             }
         }
 
         let usage = TokenUsage {
-            input_tokens: resp_body["usage"]["prompt_tokens"]
-                .as_u64()
-                .unwrap_or(0) as usize,
+            input_tokens: resp_body["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as usize,
             output_tokens: resp_body["usage"]["completion_tokens"]
                 .as_u64()
                 .unwrap_or(0) as usize,

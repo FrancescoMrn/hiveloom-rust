@@ -44,12 +44,20 @@ pub struct UpdateCapabilityRequest {
 
 pub async fn create_capability(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, aid)): Path<(uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str)): Path<(String, String)>,
     Json(body): Json<CreateCapabilityRequest>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
     match Capability::create(
@@ -66,18 +74,29 @@ pub async fn create_capability(
             output_schema: body.output_schema.as_deref(),
         },
     ) {
-        Ok(cap) => (StatusCode::CREATED, Json(serde_json::to_value(cap).unwrap())),
+        Ok(cap) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(cap).unwrap()),
+        ),
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
 pub async fn list_capabilities(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, aid)): Path<(uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
     match Capability::list_by_agent(conn, tid, aid) {
@@ -88,11 +107,19 @@ pub async fn list_capabilities(
 
 pub async fn get_capability(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, _aid, cid)): Path<(uuid::Uuid, uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str, cid)): Path<(String, String, uuid::Uuid)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let _aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
     match Capability::get(conn, cid) {
@@ -104,12 +131,20 @@ pub async fn get_capability(
 
 pub async fn update_capability(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, _aid, cid)): Path<(uuid::Uuid, uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str, cid)): Path<(String, String, uuid::Uuid)>,
     Json(body): Json<UpdateCapabilityRequest>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let _aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
     match Capability::update(
@@ -125,23 +160,29 @@ pub async fn update_capability(
             output_schema: body.output_schema.as_deref(),
         },
     ) {
-        Ok(()) => {
-            match Capability::get(conn, cid) {
-                Ok(Some(cap)) => (StatusCode::OK, Json(serde_json::to_value(cap).unwrap())),
-                _ => err_json(StatusCode::NOT_FOUND, "Capability not found after update"),
-            }
-        }
+        Ok(()) => match Capability::get(conn, cid) {
+            Ok(Some(cap)) => (StatusCode::OK, Json(serde_json::to_value(cap).unwrap())),
+            _ => err_json(StatusCode::NOT_FOUND, "Capability not found after update"),
+        },
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
 pub async fn delete_capability(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, _aid, cid)): Path<(uuid::Uuid, uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str, cid)): Path<(String, String, uuid::Uuid)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let _aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
     match Capability::delete(conn, cid) {

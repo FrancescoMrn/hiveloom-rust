@@ -84,7 +84,8 @@ impl CompactionEngine {
         }
 
         let total_tokens = counter.count_messages(&messages);
-        let threshold_tokens = (context_window as f64 * config.threshold_pct as f64 / 100.0) as usize;
+        let threshold_tokens =
+            (context_window as f64 * config.threshold_pct as f64 / 100.0) as usize;
 
         if total_tokens < threshold_tokens {
             return Ok(CompactionOutcome::NotNeeded);
@@ -360,11 +361,7 @@ fn get_workflow_state(conn: &Connection, conversation_id: Uuid) -> Result<Option
 }
 
 /// Update conversation with compaction state.
-fn update_compaction_state(
-    conn: &Connection,
-    conversation_id: Uuid,
-    summary: &str,
-) -> Result<()> {
+fn update_compaction_state(conn: &Connection, conversation_id: Uuid, summary: &str) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
         "UPDATE conversations

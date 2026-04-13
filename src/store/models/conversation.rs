@@ -211,7 +211,10 @@ impl ConversationTurn {
         Ok(turn)
     }
 
-    pub fn list_by_conversation(conn: &Connection, conversation_id: Uuid) -> Result<Vec<ConversationTurn>> {
+    pub fn list_by_conversation(
+        conn: &Connection,
+        conversation_id: Uuid,
+    ) -> Result<Vec<ConversationTurn>> {
         let mut stmt = conn.prepare(
             "SELECT id, tenant_id, conversation_id, turn_index, role, content, token_count, created_at
              FROM conversation_turns WHERE conversation_id = ?1 ORDER BY turn_index",

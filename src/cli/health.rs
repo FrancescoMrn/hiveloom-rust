@@ -20,7 +20,7 @@ pub struct HealthArgs {
 #[derive(Args)]
 pub struct DoctorArgs {
     /// Data directory to check
-    #[arg(long, default_value = "/var/lib/hiveloom")]
+    #[arg(long, default_value_t = crate::cli::local::default_data_dir())]
     pub data_dir: String,
 
     /// Output as JSON
@@ -139,11 +139,7 @@ pub async fn run_doctor(args: DoctorArgs) -> anyhow::Result<()> {
     // If platform.db exists, check SQLite integrity
     if db_ok {
         let integrity = check_sqlite_integrity(&db_path);
-        checks.push((
-            "platform.db integrity",
-            integrity.0,
-            integrity.1,
-        ));
+        checks.push(("platform.db integrity", integrity.0, integrity.1));
     }
 
     // Check tenants directory
@@ -192,14 +188,9 @@ pub async fn run_doctor(args: DoctorArgs) -> anyhow::Result<()> {
 }
 
 fn check_sqlite_integrity(path: &std::path::Path) -> (bool, String) {
-    match rusqlite::Connection::open_with_flags(
-        path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-    ) {
+    match rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) {
         Ok(conn) => {
-            match conn.query_row("PRAGMA integrity_check", [], |row| {
-                row.get::<_, String>(0)
-            }) {
+            match conn.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0)) {
                 Ok(result) if result == "ok" => (true, "OK".to_string()),
                 Ok(result) => (false, format!("Integrity issue: {result}")),
                 Err(e) => (false, format!("Check failed: {e}")),
@@ -213,13 +204,14 @@ pub async fn run_status(args: StatusArgs) -> anyhow::Result<()> {
     let client = ApiClient::new(args.endpoint.clone(), args.token.clone());
 
     // Probe healthz
-    let health_ok = client.get_raw("/healthz").await.map(|s| s.is_success()).unwrap_or(false);
+    let health_ok = client
+        .get_raw("/healthz")
+        .await
+        .map(|s| s.is_success())
+        .unwrap_or(false);
 
     // Try to get tenant count
-    let tenants: Vec<serde_json::Value> = client
-        .get("/api/tenants")
-        .await
-        .unwrap_or_default();
+    let tenants: Vec<serde_json::Value> = client.get("/api/tenants").await.unwrap_or_default();
 
     if args.json {
         let out = serde_json::json!({
@@ -228,7 +220,11 @@ pub async fn run_status(args: StatusArgs) -> anyhow::Result<()> {
         });
         println!("{}", serde_json::to_string_pretty(&out)?);
     } else {
-        let state = if health_ok { "running" } else { "not reachable" };
+        let state = if health_ok {
+            "running"
+        } else {
+            "not reachable"
+        };
         println!("Service state:  {state}");
         println!("Tenants:        {}", tenants.len());
     }

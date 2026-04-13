@@ -18,9 +18,8 @@ impl DedupTable {
     pub fn load_from_store(conn: &rusqlite::Connection) -> anyhow::Result<Self> {
         let now = chrono::Utc::now();
         let now_str = now.to_rfc3339();
-        let mut stmt = conn.prepare(
-            "SELECT delivery_id, received_at FROM dedup_entries WHERE expires_at > ?1",
-        )?;
+        let mut stmt = conn
+            .prepare("SELECT delivery_id, received_at FROM dedup_entries WHERE expires_at > ?1")?;
         let rows = stmt.query_map(rusqlite::params![now_str], |row| {
             let delivery_id: String = row.get(0)?;
             let received_at_str: String = row.get(1)?;

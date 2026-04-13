@@ -135,7 +135,10 @@ pub fn find_resumable_workflows(
             rusqlite::Error::FromSqlConversionFailure(
                 0,
                 rusqlite::types::Type::Text,
-                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("invalid uuid: {}", e))),
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("invalid uuid: {}", e),
+                )),
             )
         })?;
         match serde_json::from_str::<WorkflowState>(&ws_str) {

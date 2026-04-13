@@ -50,9 +50,7 @@ pub async fn create_token(
 }
 
 /// GET /api/auth/tokens — list all tokens
-pub async fn list_tokens(
-    State(state): State<Arc<crate::server::AppState>>,
-) -> impl IntoResponse {
+pub async fn list_tokens(State(state): State<Arc<crate::server::AppState>>) -> impl IntoResponse {
     let conn = state.platform_store.conn();
     match PlatformAdminToken::list(&conn) {
         Ok(tokens) => {

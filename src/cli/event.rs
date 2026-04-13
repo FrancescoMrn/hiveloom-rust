@@ -9,7 +9,7 @@ pub struct EventArgs {
     pub command: EventCommand,
 
     /// Tenant slug (default: "default")
-    #[arg(long, default_value = "default", global = true)]
+    #[arg(long, default_value_t = crate::cli::local::default_tenant(), global = true)]
     pub tenant: String,
 
     /// API endpoint
@@ -152,7 +152,10 @@ pub async fn run(args: EventArgs) -> anyhow::Result<()> {
                 println!("\n{} subscription(s)", subs.len());
             }
         }
-        EventCommand::Show { agent, subscription } => {
+        EventCommand::Show {
+            agent,
+            subscription,
+        } => {
             let s: EventSubscriptionResponse = client
                 .get(&format!(
                     "/api/tenants/{tid}/agents/{agent}/event-subscriptions/{subscription}"
@@ -165,12 +168,18 @@ pub async fn run(args: EventArgs) -> anyhow::Result<()> {
                 println!("Agent:           {}", s.agent_id);
                 println!("Tenant:          {}", s.tenant_id);
                 println!("Event type:      {}", s.event_type);
-                println!("Source filter:   {}", s.source_filter.as_deref().unwrap_or("-"));
+                println!(
+                    "Source filter:   {}",
+                    s.source_filter.as_deref().unwrap_or("-")
+                );
                 println!("Status:          {}", s.status);
                 println!("Created:         {}", s.created_at);
             }
         }
-        EventCommand::Disable { agent, subscription } => {
+        EventCommand::Disable {
+            agent,
+            subscription,
+        } => {
             let s: EventSubscriptionResponse = client
                 .post(
                     &format!(
@@ -185,7 +194,10 @@ pub async fn run(args: EventArgs) -> anyhow::Result<()> {
                 println!("Disabled event subscription {}", s.id);
             }
         }
-        EventCommand::Enable { agent, subscription } => {
+        EventCommand::Enable {
+            agent,
+            subscription,
+        } => {
             let s: EventSubscriptionResponse = client
                 .post(
                     &format!(
@@ -200,7 +212,10 @@ pub async fn run(args: EventArgs) -> anyhow::Result<()> {
                 println!("Enabled event subscription {}", s.id);
             }
         }
-        EventCommand::Delete { agent, subscription } => {
+        EventCommand::Delete {
+            agent,
+            subscription,
+        } => {
             client
                 .delete(&format!(
                     "/api/tenants/{tid}/agents/{agent}/event-subscriptions/{subscription}"

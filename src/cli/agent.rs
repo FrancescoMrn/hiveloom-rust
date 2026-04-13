@@ -9,7 +9,7 @@ pub struct AgentArgs {
     pub command: AgentCommand,
 
     /// Tenant slug (default: "default")
-    #[arg(long, default_value = "default", global = true)]
+    #[arg(long, default_value_t = crate::cli::local::default_tenant(), global = true)]
     pub tenant: String,
 
     /// API endpoint
@@ -38,8 +38,8 @@ pub enum AgentCommand {
         /// System prompt text
         #[arg(long, default_value = "You are a helpful assistant.")]
         system_prompt: String,
-        /// Scope mode (strict | tenant_only | permissive)
-        #[arg(long, default_value = "tenant_only")]
+        /// Scope mode (dual | tenant-only | user-only)
+        #[arg(long, default_value = "dual")]
         scope_mode: String,
     },
     /// List agents in a tenant
@@ -204,8 +204,9 @@ pub async fn run(args: AgentArgs) -> anyhow::Result<()> {
                 "system_prompt": system_prompt,
                 "scope_mode": scope_mode,
             });
-            let agent: AgentResponse =
-                client.post(&format!("/api/tenants/{tid}/agents"), &body).await?;
+            let agent: AgentResponse = client
+                .post(&format!("/api/tenants/{tid}/agents"), &body)
+                .await?;
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&agent)?);
             } else {
@@ -233,8 +234,9 @@ pub async fn run(args: AgentArgs) -> anyhow::Result<()> {
             }
         }
         AgentCommand::Show { id } => {
-            let agent: AgentResponse =
-                client.get(&format!("/api/tenants/{tid}/agents/{id}")).await?;
+            let agent: AgentResponse = client
+                .get(&format!("/api/tenants/{tid}/agents/{id}"))
+                .await?;
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&agent)?);
             } else {
@@ -247,13 +249,18 @@ pub async fn run(args: AgentArgs) -> anyhow::Result<()> {
             model,
             system_prompt,
         } => {
+            // Fetch current agent to merge with provided fields
+            let current: AgentResponse = client
+                .get(&format!("/api/tenants/{tid}/agents/{id}"))
+                .await?;
             let body = serde_json::json!({
-                "name": name,
-                "model_id": model,
-                "system_prompt": system_prompt,
+                "name": name.unwrap_or(current.name),
+                "model_id": model.unwrap_or(current.model_id),
+                "system_prompt": system_prompt.unwrap_or(current.system_prompt),
             });
-            let agent: AgentResponse =
-                client.put(&format!("/api/tenants/{tid}/agents/{id}"), &body).await?;
+            let agent: AgentResponse = client
+                .put(&format!("/api/tenants/{tid}/agents/{id}"), &body)
+                .await?;
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&agent)?);
             } else {
@@ -261,7 +268,9 @@ pub async fn run(args: AgentArgs) -> anyhow::Result<()> {
             }
         }
         AgentCommand::Delete { id } => {
-            client.delete(&format!("/api/tenants/{tid}/agents/{id}")).await?;
+            client
+                .delete(&format!("/api/tenants/{tid}/agents/{id}"))
+                .await?;
             println!("Deleted agent {id}");
         }
         AgentCommand::Versions { id } => {
@@ -286,7 +295,7 @@ pub async fn run(args: AgentArgs) -> anyhow::Result<()> {
             }
         }
         AgentCommand::Rollback { id, to_version } => {
-            let body = serde_json::json!({ "to_version": to_version });
+            let body = serde_json::json!({ "version": to_version });
             let agent: AgentResponse = client
                 .post(&format!("/api/tenants/{tid}/agents/{id}/rollback"), &body)
                 .await?;
@@ -301,8 +310,9 @@ pub async fn run(args: AgentArgs) -> anyhow::Result<()> {
         }
         AgentCommand::Export { id } => {
             // T051: full export — agent + capabilities + bindings
-            let agent: AgentResponse =
-                client.get(&format!("/api/tenants/{tid}/agents/{id}")).await?;
+            let agent: AgentResponse = client
+                .get(&format!("/api/tenants/{tid}/agents/{id}"))
+                .await?;
             let caps: Vec<CapabilityResponse> = client
                 .get(&format!("/api/tenants/{tid}/agents/{id}/capabilities"))
                 .await
@@ -389,7 +399,10 @@ pub async fn run(args: AgentArgs) -> anyhow::Result<()> {
                     "reset": reset,
                 });
                 let result: serde_json::Value = client
-                    .patch(&format!("/api/tenants/{tid}/agents/{id}/compaction-config"), &body)
+                    .patch(
+                        &format!("/api/tenants/{tid}/agents/{id}/compaction-config"),
+                        &body,
+                    )
                     .await?;
                 if json_out {
                     println!("{}", serde_json::to_string_pretty(&result)?);
@@ -420,10 +433,22 @@ fn print_compaction_config(config: &serde_json::Value) {
         .get("source")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
-    let threshold = config.get("threshold_pct").and_then(|v| v.as_i64()).unwrap_or(80);
-    let max_summary = config.get("max_summary_fraction_pct").and_then(|v| v.as_i64()).unwrap_or(30);
-    let protected = config.get("protected_turn_count").and_then(|v| v.as_i64()).unwrap_or(4);
-    let indicator = config.get("show_indicator").and_then(|v| v.as_bool()).unwrap_or(false);
+    let threshold = config
+        .get("threshold_pct")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(80);
+    let max_summary = config
+        .get("max_summary_fraction_pct")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(30);
+    let protected = config
+        .get("protected_turn_count")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(4);
+    let indicator = config
+        .get("show_indicator")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     println!("  Threshold:        {}% ({})", threshold, source);
     println!("  Max summary:      {}% ({})", max_summary, source);
@@ -449,5 +474,8 @@ fn print_agent_detail(a: &AgentResponse) {
     // T036: Compaction info
     println!("Compaction:");
     println!("  Count:          {}", a.compaction_count);
-    println!("  Last compacted: {}", a.last_compaction_at.as_deref().unwrap_or("never"));
+    println!(
+        "  Last compacted: {}",
+        a.last_compaction_at.as_deref().unwrap_or("never")
+    );
 }

@@ -86,7 +86,9 @@ pub async fn run_rollback(args: RollbackArgs) -> anyhow::Result<()> {
         println!();
         println!("Binary rollback is not yet implemented.");
         println!("To revert, reinstall the previous version:");
-        println!("  curl -fsSL https://get.hiveloom.cloud/install.sh | bash -s -- --version <VERSION>");
+        println!(
+            "  curl -fsSL https://get.hiveloom.cloud/install.sh | bash -s -- --version <VERSION>"
+        );
     }
 
     Ok(())

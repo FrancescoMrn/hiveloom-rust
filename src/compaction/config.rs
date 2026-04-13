@@ -118,7 +118,11 @@ impl CompactionConfig {
         protected_turn_count: i64,
         show_indicator: bool,
     ) -> Result<Self> {
-        validate_config(threshold_pct, max_summary_fraction_pct, protected_turn_count)?;
+        validate_config(
+            threshold_pct,
+            max_summary_fraction_pct,
+            protected_turn_count,
+        )?;
 
         let id = Uuid::new_v4();
         let now = chrono::Utc::now().to_rfc3339();
@@ -223,7 +227,14 @@ impl CompactionConfig {
              SET threshold_pct = ?1, max_summary_fraction_pct = ?2,
                  protected_turn_count = ?3, show_indicator = ?4, updated_at = ?5
              WHERE id = ?6",
-            params![new_threshold, new_max_summary, new_protected, new_indicator, now, id.to_string()],
+            params![
+                new_threshold,
+                new_max_summary,
+                new_protected,
+                new_indicator,
+                now,
+                id.to_string()
+            ],
         )?;
         Ok(())
     }

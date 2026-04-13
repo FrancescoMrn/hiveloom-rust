@@ -75,10 +75,7 @@ impl McpSetupCode {
     }
 
     /// Find a valid (unused, not expired) setup code by its hash.
-    pub fn get_valid_by_hash(
-        conn: &Connection,
-        code_hash: &str,
-    ) -> Result<Option<McpSetupCode>> {
+    pub fn get_valid_by_hash(conn: &Connection, code_hash: &str) -> Result<Option<McpSetupCode>> {
         let now = chrono::Utc::now().to_rfc3339();
         let sql = format!(
             "SELECT {} FROM mcp_setup_codes

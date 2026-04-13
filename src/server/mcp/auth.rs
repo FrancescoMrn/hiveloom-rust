@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
 };
@@ -17,11 +17,13 @@ use crate::store::models::{McpClientRegistration, McpSetupCode};
 /// Returns the OAuth Authorization Server metadata per RFC 8414.
 pub async fn oauth_metadata(
     State(_state): State<Arc<crate::server::AppState>>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
+    let base_url = external_base_url(&headers);
     Json(serde_json::json!({
-        "issuer": "https://hiveloom.local",
-        "authorization_endpoint": "/mcp/authorize",
-        "token_endpoint": "/mcp/token",
+        "issuer": base_url,
+        "authorization_endpoint": format!("{}/mcp/authorize", base_url),
+        "token_endpoint": format!("{}/mcp/token", base_url),
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "token_endpoint_auth_methods_supported": ["none"],
@@ -34,12 +36,31 @@ pub async fn oauth_metadata(
 /// Returns the protected resource metadata.
 pub async fn protected_resource_metadata(
     Path(tenant_slug): Path<String>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
+    let base_url = external_base_url(&headers);
     Json(serde_json::json!({
-        "resource": format!("https://hiveloom.local/mcp/{}", tenant_slug),
-        "authorization_servers": ["https://hiveloom.local"],
+        "resource": format!("{}/mcp/{}", base_url, tenant_slug),
+        "authorization_servers": [base_url],
         "bearer_methods_supported": ["header"]
     }))
+}
+
+fn external_base_url(headers: &HeaderMap) -> String {
+    let proto = header_value(headers, "x-forwarded-proto")
+        .or_else(|| header_value(headers, "x-forwarded-protocol"))
+        .unwrap_or_else(|| "http".to_string());
+    let host = header_value(headers, "x-forwarded-host")
+        .or_else(|| header_value(headers, "host"))
+        .unwrap_or_else(|| "127.0.0.1:3000".to_string());
+    format!("{}://{}", proto, host)
+}
+
+fn header_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string())
 }
 
 // ── T086: Authorize endpoint (setup code entry) ───────────────────────
@@ -67,9 +88,7 @@ pub struct SetupCodeSubmission {
 ///
 /// Returns a setup code entry form. In production this would be an HTML
 /// page; here we return JSON indicating that a setup code is required.
-pub async fn authorize(
-    Query(params): Query<AuthorizeParams>,
-) -> impl IntoResponse {
+pub async fn authorize(Query(params): Query<AuthorizeParams>) -> impl IntoResponse {
     if params.response_type != "code" {
         return (
             StatusCode::BAD_REQUEST,
@@ -119,8 +138,7 @@ pub async fn authorize_submit(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Mark the setup code as used
-    McpSetupCode::mark_used(conn, setup_code.id)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    McpSetupCode::mark_used(conn, setup_code.id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // Generate an authorization code (short-lived, to be exchanged at token endpoint)
     let auth_code = oauth_server::generate_token();
@@ -218,9 +236,8 @@ async fn exchange_code(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         let conn = tenant_store.conn();
 
-        if let Some(reg) =
-            McpClientRegistration::get_by_access_token_hash(conn, &code_hash)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        if let Some(reg) = McpClientRegistration::get_by_access_token_hash(conn, &code_hash)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         {
             // Check expiry
             if let Some(ref expires_at) = reg.token_expires_at {

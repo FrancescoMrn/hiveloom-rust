@@ -30,12 +30,20 @@ pub struct UpdateEventSubscriptionRequest {
 
 pub async fn create_event_subscription(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, aid)): Path<(uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str)): Path<(String, String)>,
     Json(body): Json<CreateEventSubscriptionRequest>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
 
@@ -49,18 +57,29 @@ pub async fn create_event_subscription(
         body.source_filter.as_deref(),
         &token_hash,
     ) {
-        Ok(sub) => (StatusCode::CREATED, Json(serde_json::to_value(sub).unwrap())),
+        Ok(sub) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(sub).unwrap()),
+        ),
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
 pub async fn list_event_subscriptions(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, aid)): Path<(uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
     match EventSubscription::list_by_agent(conn, tid, aid) {
@@ -71,11 +90,19 @@ pub async fn list_event_subscriptions(
 
 pub async fn get_event_subscription(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, _aid, sid)): Path<(uuid::Uuid, uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str, sid)): Path<(String, String, uuid::Uuid)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let _aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
     match EventSubscription::get(conn, sid) {
@@ -87,11 +114,19 @@ pub async fn get_event_subscription(
 
 pub async fn delete_event_subscription(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, _aid, sid)): Path<(uuid::Uuid, uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str, sid)): Path<(String, String, uuid::Uuid)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let _aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
     match EventSubscription::delete(conn, sid) {
@@ -102,40 +137,52 @@ pub async fn delete_event_subscription(
 
 pub async fn disable_event_subscription(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, _aid, sid)): Path<(uuid::Uuid, uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str, sid)): Path<(String, String, uuid::Uuid)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     };
+    let _aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let conn = tenant_store.conn();
     match EventSubscription::disable(conn, sid) {
-        Ok(()) => {
-            match EventSubscription::get(conn, sid) {
-                Ok(Some(sub)) => (StatusCode::OK, Json(serde_json::to_value(sub).unwrap())),
-                _ => err_json(StatusCode::NOT_FOUND, "Subscription not found"),
-            }
-        }
+        Ok(()) => match EventSubscription::get(conn, sid) {
+            Ok(Some(sub)) => (StatusCode::OK, Json(serde_json::to_value(sub).unwrap())),
+            _ => err_json(StatusCode::NOT_FOUND, "Subscription not found"),
+        },
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
 pub async fn enable_event_subscription(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, _aid, sid)): Path<(uuid::Uuid, uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str, sid)): Path<(String, String, uuid::Uuid)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     };
+    let _aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let conn = tenant_store.conn();
     match EventSubscription::enable(conn, sid) {
-        Ok(()) => {
-            match EventSubscription::get(conn, sid) {
-                Ok(Some(sub)) => (StatusCode::OK, Json(serde_json::to_value(sub).unwrap())),
-                _ => err_json(StatusCode::NOT_FOUND, "Subscription not found"),
-            }
-        }
+        Ok(()) => match EventSubscription::get(conn, sid) {
+            Ok(Some(sub)) => (StatusCode::OK, Json(serde_json::to_value(sub).unwrap())),
+            _ => err_json(StatusCode::NOT_FOUND, "Subscription not found"),
+        },
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }

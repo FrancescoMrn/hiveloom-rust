@@ -5,7 +5,9 @@ use crate::store::migrations::run_migrations;
 
 /// Migrations applied to every per-tenant database.
 const TENANT_MIGRATIONS: &[(&str, &str)] = &[
-    ("0001_create_agents", r#"
+    (
+        "0001_create_agents",
+        r#"
         CREATE TABLE IF NOT EXISTS agents (
             id TEXT NOT NULL,
             tenant_id TEXT NOT NULL,
@@ -25,8 +27,11 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             PRIMARY KEY (id, version)
         );
         CREATE INDEX IF NOT EXISTS idx_agents_current ON agents(tenant_id, is_current) WHERE is_current = 1;
-    "#),
-    ("0002_create_capabilities", r#"
+    "#,
+    ),
+    (
+        "0002_create_capabilities",
+        r#"
         CREATE TABLE IF NOT EXISTS capabilities (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -42,8 +47,11 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             updated_at TEXT NOT NULL,
             UNIQUE(tenant_id, agent_id, name)
         );
-    "#),
-    ("0003_create_conversations", r#"
+    "#,
+    ),
+    (
+        "0003_create_conversations",
+        r#"
         CREATE TABLE IF NOT EXISTS conversations (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -60,8 +68,11 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             abandoned_at TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_conversations_active ON conversations(tenant_id, agent_id, surface_type, surface_ref, status) WHERE status = 'active';
-    "#),
-    ("0004_create_conversation_turns", r#"
+    "#,
+    ),
+    (
+        "0004_create_conversation_turns",
+        r#"
         CREATE TABLE IF NOT EXISTS conversation_turns (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -73,8 +84,11 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_turns_by_conversation ON conversation_turns(conversation_id, turn_index);
-    "#),
-    ("0005_create_memory_entries", r#"
+    "#,
+    ),
+    (
+        "0005_create_memory_entries",
+        r#"
         CREATE TABLE IF NOT EXISTS memory_entries (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -94,8 +108,11 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             UNIQUE(tenant_id, agent_id, scope, key)
         );
         CREATE INDEX IF NOT EXISTS idx_memory_scope ON memory_entries(tenant_id, agent_id, scope) WHERE archived = 0;
-    "#),
-    ("0006_create_credential_vault_entries", r#"
+    "#,
+    ),
+    (
+        "0006_create_credential_vault_entries",
+        r#"
         CREATE TABLE IF NOT EXISTS credential_vault_entries (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -111,8 +128,11 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             rotated_at TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_credentials_lookup ON credential_vault_entries(tenant_id, name, agent_id);
-    "#),
-    ("0007_create_chat_surface_bindings", r#"
+    "#,
+    ),
+    (
+        "0007_create_chat_surface_bindings",
+        r#"
         CREATE TABLE IF NOT EXISTS chat_surface_bindings (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -122,8 +142,11 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             created_at TEXT NOT NULL,
             UNIQUE(tenant_id, surface_type, surface_ref)
         );
-    "#),
-    ("0008_create_dedup_entries", r#"
+    "#,
+    ),
+    (
+        "0008_create_dedup_entries",
+        r#"
         CREATE TABLE IF NOT EXISTS dedup_entries (
             delivery_id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -132,8 +155,11 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             expires_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_dedup_expiry ON dedup_entries(expires_at);
-    "#),
-    ("0009_create_capability_invocation_logs", r#"
+    "#,
+    ),
+    (
+        "0009_create_capability_invocation_logs",
+        r#"
         CREATE TABLE IF NOT EXISTS capability_invocation_logs (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -146,8 +172,11 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_invocation_logs_recent ON capability_invocation_logs(tenant_id, agent_id, created_at);
-    "#),
-    ("0010_create_scheduled_jobs", r#"
+    "#,
+    ),
+    (
+        "0010_create_scheduled_jobs",
+        r#"
         CREATE TABLE IF NOT EXISTS scheduled_jobs (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -162,8 +191,11 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_due ON scheduled_jobs(status, next_fire_at);
-    "#),
-    ("0011_create_event_subscriptions", r#"
+    "#,
+    ),
+    (
+        "0011_create_event_subscriptions",
+        r#"
         CREATE TABLE IF NOT EXISTS event_subscriptions (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -174,9 +206,12 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','disabled')),
             created_at TEXT NOT NULL
         );
-    "#),
+    "#,
+    ),
     // ── Phase 6: OAuth consent flow (T072) ─────────────────────────────
-    ("0012_create_oauth_authorization_requests", r#"
+    (
+        "0012_create_oauth_authorization_requests",
+        r#"
         CREATE TABLE IF NOT EXISTS oauth_authorization_requests (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -190,9 +225,12 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             completed_at TEXT,
             created_at TEXT NOT NULL
         );
-    "#),
+    "#,
+    ),
     // ── Phase 6: MCP tables (T078) ─────────────────────────────────────
-    ("0013_create_mcp_identities", r#"
+    (
+        "0013_create_mcp_identities",
+        r#"
         CREATE TABLE IF NOT EXISTS mcp_identities (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -202,8 +240,11 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
-    "#),
-    ("0014_create_mcp_client_registrations", r#"
+    "#,
+    ),
+    (
+        "0014_create_mcp_client_registrations",
+        r#"
         CREATE TABLE IF NOT EXISTS mcp_client_registrations (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -215,9 +256,12 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             created_at TEXT NOT NULL,
             revoked_at TEXT
         );
-    "#),
+    "#,
+    ),
     // ── Phase 7: Reflection reports (T097) ──────────────────────────────
-    ("0016_create_reflection_reports", r#"
+    (
+        "0016_create_reflection_reports",
+        r#"
         CREATE TABLE IF NOT EXISTS reflection_reports (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -229,8 +273,11 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             memory_suggestions TEXT NOT NULL DEFAULT '[]',
             created_at TEXT NOT NULL
         );
-    "#),
-    ("0015_create_mcp_setup_codes", r#"
+    "#,
+    ),
+    (
+        "0015_create_mcp_setup_codes",
+        r#"
         CREATE TABLE IF NOT EXISTS mcp_setup_codes (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -240,9 +287,12 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             used_at TEXT,
             created_at TEXT NOT NULL
         );
-    "#),
+    "#,
+    ),
     // ── Spec 002: Context Compaction (T008) ─────────────────────────────
-    ("0017_create_compaction_config", r#"
+    (
+        "0017_create_compaction_config",
+        r#"
         CREATE TABLE IF NOT EXISTS compaction_config (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -256,8 +306,11 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             UNIQUE(tenant_id, agent_id)
         );
         CREATE INDEX IF NOT EXISTS idx_compaction_config_lookup ON compaction_config(tenant_id, agent_id);
-    "#),
-    ("0018_create_compaction_events", r#"
+    "#,
+    ),
+    (
+        "0018_create_compaction_events",
+        r#"
         CREATE TABLE IF NOT EXISTS compaction_events (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -272,8 +325,11 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             error_message TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_compaction_events_lookup ON compaction_events(tenant_id, agent_id, timestamp);
-    "#),
-    ("0019_create_raw_turn_archive", r#"
+    "#,
+    ),
+    (
+        "0019_create_raw_turn_archive",
+        r#"
         CREATE TABLE IF NOT EXISTS raw_turn_archive (
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
@@ -287,13 +343,17 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
         );
         CREATE INDEX IF NOT EXISTS idx_raw_turn_archive_lookup ON raw_turn_archive(tenant_id, conversation_id, turn_index);
         CREATE INDEX IF NOT EXISTS idx_raw_turn_archive_expiry ON raw_turn_archive(expires_at);
-    "#),
-    ("0020_add_compaction_fields_to_conversations", r#"
+    "#,
+    ),
+    (
+        "0020_add_compaction_fields_to_conversations",
+        r#"
         ALTER TABLE conversations ADD COLUMN compacted_summary TEXT;
         ALTER TABLE conversations ADD COLUMN compaction_count INTEGER DEFAULT 0;
         ALTER TABLE conversations ADD COLUMN last_compaction_at TEXT;
         ALTER TABLE conversations ADD COLUMN raw_turns_archived INTEGER DEFAULT 0;
-    "#),
+    "#,
+    ),
 ];
 
 pub struct TenantStore {

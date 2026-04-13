@@ -3,8 +3,8 @@
 //! When LLM summarization fails, drop oldest turns beyond the protected window,
 //! keeping system prompt + most recent N turns + 10% response buffer.
 
-use crate::store::models::ConversationTurn;
 use crate::compaction::counter::TokenCounter;
+use crate::store::models::ConversationTurn;
 
 /// Result of a truncation operation.
 #[derive(Debug, Clone)]
@@ -115,7 +115,8 @@ impl Truncator {
             }
         }
 
-        let kept_turn_indices: Vec<i64> = kept_indices.iter().map(|&i| turns[i].turn_index).collect();
+        let kept_turn_indices: Vec<i64> =
+            kept_indices.iter().map(|&i| turns[i].turn_index).collect();
         let dropped_turn_indices: Vec<i64> = turns
             .iter()
             .filter(|t| !kept_turn_indices.contains(&t.turn_index))

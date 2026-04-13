@@ -14,7 +14,7 @@ pub struct CompactionLogArgs {
     pub agent: Option<String>,
 
     /// Filter by tenant (default: "default")
-    #[arg(long, default_value = "default")]
+    #[arg(long, default_value_t = crate::cli::local::default_tenant())]
     pub tenant: String,
 
     /// Show events from the last N hours/days (e.g. "1h", "6h", "24h", "7d", "30d")
@@ -94,7 +94,13 @@ pub async fn run(args: CompactionLogArgs) -> anyhow::Result<()> {
             let fallback = if ev.fallback_used { "yes" } else { "no" };
             println!(
                 "{:<22} {:<16} {:<16} {:>8} {:>8} {:<16} {:<8}",
-                ts_short, agent_short, conv_short, ev.tokens_before, ev.tokens_after, ev.strategy, fallback
+                ts_short,
+                agent_short,
+                conv_short,
+                ev.tokens_before,
+                ev.tokens_after,
+                ev.strategy,
+                fallback
             );
         }
         println!("\n{} event(s)", events.len());

@@ -31,9 +31,15 @@ pub struct CreateAgentRequest {
     pub reflection_cron: Option<String>,
 }
 
-fn default_scope_mode() -> String { "dual".to_string() }
-fn default_scope_policy() -> String { "tenant".to_string() }
-fn default_coerce_policy() -> String { "coerce".to_string() }
+fn default_scope_mode() -> String {
+    "dual".to_string()
+}
+fn default_scope_policy() -> String {
+    "tenant".to_string()
+}
+fn default_coerce_policy() -> String {
+    "coerce".to_string()
+}
 
 #[derive(Deserialize)]
 pub struct UpdateAgentRequest {
@@ -58,9 +64,13 @@ pub struct RollbackRequest {
 
 pub async fn create_agent(
     State(state): State<Arc<super::super::AppState>>,
-    Path(tid): Path<uuid::Uuid>,
+    Path(tid_str): Path<String>,
     Json(body): Json<CreateAgentRequest>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
@@ -78,15 +88,22 @@ pub async fn create_agent(
         body.reflection_enabled,
         body.reflection_cron.as_deref(),
     ) {
-        Ok(agent) => (StatusCode::CREATED, Json(serde_json::to_value(agent).unwrap())),
+        Ok(agent) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(agent).unwrap()),
+        ),
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
 pub async fn list_agents(
     State(state): State<Arc<super::super::AppState>>,
-    Path(tid): Path<uuid::Uuid>,
+    Path(tid_str): Path<String>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
@@ -100,11 +117,19 @@ pub async fn list_agents(
 
 pub async fn get_agent(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, aid)): Path<(uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
     match Agent::get_current(conn, tid, aid) {
@@ -116,12 +141,20 @@ pub async fn get_agent(
 
 pub async fn update_agent(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, aid)): Path<(uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str)): Path<(String, String)>,
     Json(body): Json<UpdateAgentRequest>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
 
@@ -151,11 +184,19 @@ pub async fn update_agent(
 
 pub async fn delete_agent(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, aid)): Path<(uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
     match Agent::delete(conn, aid) {
@@ -166,31 +207,48 @@ pub async fn delete_agent(
 
 pub async fn list_versions(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, aid)): Path<(uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     };
+    let aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let conn = tenant_store.conn();
-    let _ = tid; // tenant_id used for store isolation
     match Agent::list_versions(conn, aid) {
-        Ok(versions) => (StatusCode::OK, Json(serde_json::to_value(versions).unwrap())),
+        Ok(versions) => (
+            StatusCode::OK,
+            Json(serde_json::to_value(versions).unwrap()),
+        ),
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
 pub async fn rollback_agent(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, aid)): Path<(uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str)): Path<(String, String)>,
     Json(body): Json<RollbackRequest>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     };
+    let aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let conn = tenant_store.conn();
-    let _ = tid;
     match Agent::rollback(conn, aid, body.version) {
         Ok(agent) => (StatusCode::OK, Json(serde_json::to_value(agent).unwrap())),
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
@@ -207,42 +265,72 @@ pub struct CreateBindingRequest {
 
 pub async fn create_binding(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, aid)): Path<(uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str)): Path<(String, String)>,
     Json(body): Json<CreateBindingRequest>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     };
+    let aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let conn = tenant_store.conn();
     match ChatSurfaceBinding::create(conn, tid, aid, &body.surface_type, &body.surface_ref) {
-        Ok(binding) => (StatusCode::CREATED, Json(serde_json::to_value(binding).unwrap())),
+        Ok(binding) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(binding).unwrap()),
+        ),
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
 pub async fn list_bindings(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, aid)): Path<(uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     };
+    let aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let conn = tenant_store.conn();
     match ChatSurfaceBinding::list_by_agent(conn, tid, aid) {
-        Ok(bindings) => (StatusCode::OK, Json(serde_json::to_value(bindings).unwrap())),
+        Ok(bindings) => (
+            StatusCode::OK,
+            Json(serde_json::to_value(bindings).unwrap()),
+        ),
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
 pub async fn delete_binding(
     State(state): State<Arc<super::super::AppState>>,
-    Path((_tid, _aid, bid)): Path<(uuid::Uuid, uuid::Uuid, uuid::Uuid)>,
+    Path((tid_str, aid_str, bid)): Path<(String, String, uuid::Uuid)>,
 ) -> impl IntoResponse {
-    let tenant_store = match state.open_tenant_store(&_tid) {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
+    let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+    };
+    let _aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
     };
     let conn = tenant_store.conn();
     match ChatSurfaceBinding::delete(conn, bid) {

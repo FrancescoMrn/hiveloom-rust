@@ -17,8 +17,7 @@ pub struct OAuthAuthorizationRequest {
     pub created_at: String,
 }
 
-const SELECT_COLS: &str =
-    "id, tenant_id, user_identity, provider, state_token, requested_scopes, \
+const SELECT_COLS: &str = "id, tenant_id, user_identity, provider, state_token, requested_scopes, \
      paused_run_ref, surface_type, expires_at, completed_at, created_at";
 
 fn row_to_oauth_request(row: &rusqlite::Row) -> rusqlite::Result<OAuthAuthorizationRequest> {

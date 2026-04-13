@@ -114,7 +114,11 @@ impl Capability {
         }
     }
 
-    pub fn list_by_agent(conn: &Connection, tenant_id: Uuid, agent_id: Uuid) -> Result<Vec<Capability>> {
+    pub fn list_by_agent(
+        conn: &Connection,
+        tenant_id: Uuid,
+        agent_id: Uuid,
+    ) -> Result<Vec<Capability>> {
         let sql = format!(
             "SELECT {} FROM capabilities WHERE tenant_id = ?1 AND agent_id = ?2 ORDER BY name",
             SELECT_COLS
@@ -153,7 +157,10 @@ impl Capability {
     }
 
     pub fn delete(conn: &Connection, id: Uuid) -> Result<()> {
-        conn.execute("DELETE FROM capabilities WHERE id = ?1", params![id.to_string()])?;
+        conn.execute(
+            "DELETE FROM capabilities WHERE id = ?1",
+            params![id.to_string()],
+        )?;
         Ok(())
     }
 }

@@ -37,14 +37,15 @@ pub async fn create_tenant(
 ) -> impl IntoResponse {
     let conn = state.platform_store.conn();
     match Tenant::create(&conn, &body.name, &body.slug, &body.timezone) {
-        Ok(tenant) => (StatusCode::CREATED, Json(serde_json::to_value(tenant).unwrap())),
+        Ok(tenant) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(tenant).unwrap()),
+        ),
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
 }
 
-pub async fn list_tenants(
-    State(state): State<Arc<super::super::AppState>>,
-) -> impl IntoResponse {
+pub async fn list_tenants(State(state): State<Arc<super::super::AppState>>) -> impl IntoResponse {
     let conn = state.platform_store.conn();
     match Tenant::list(&conn) {
         Ok(tenants) => (StatusCode::OK, Json(serde_json::to_value(tenants).unwrap())),
@@ -54,8 +55,12 @@ pub async fn list_tenants(
 
 pub async fn get_tenant(
     State(state): State<Arc<super::super::AppState>>,
-    Path(tid): Path<uuid::Uuid>,
+    Path(tid_str): Path<String>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let conn = state.platform_store.conn();
     match Tenant::get_by_id(&conn, tid) {
         Ok(Some(tenant)) => (StatusCode::OK, Json(serde_json::to_value(tenant).unwrap())),
@@ -66,9 +71,13 @@ pub async fn get_tenant(
 
 pub async fn update_tenant(
     State(state): State<Arc<super::super::AppState>>,
-    Path(tid): Path<uuid::Uuid>,
+    Path(tid_str): Path<String>,
     Json(body): Json<UpdateTenantRequest>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let conn = state.platform_store.conn();
     match Tenant::update(&conn, tid, &body.name, &body.slug, &body.timezone) {
         Ok(()) => match Tenant::get_by_id(&conn, tid) {
@@ -81,8 +90,12 @@ pub async fn update_tenant(
 
 pub async fn delete_tenant(
     State(state): State<Arc<super::super::AppState>>,
-    Path(tid): Path<uuid::Uuid>,
+    Path(tid_str): Path<String>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let conn = state.platform_store.conn();
     match Tenant::delete(&conn, tid) {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "deleted": true }))),

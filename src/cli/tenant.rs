@@ -89,8 +89,7 @@ pub async fn run(args: TenantArgs) -> anyhow::Result<()> {
                 "slug": slug,
                 "timezone": timezone,
             });
-            let tenant: TenantResponse =
-                client.post("/api/tenants", &body).await?;
+            let tenant: TenantResponse = client.post("/api/tenants", &body).await?;
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&tenant)?);
             } else {
@@ -117,8 +116,7 @@ pub async fn run(args: TenantArgs) -> anyhow::Result<()> {
             }
         }
         TenantCommand::Show { id } => {
-            let tenant: TenantResponse =
-                client.get(&format!("/api/tenants/{id}")).await?;
+            let tenant: TenantResponse = client.get(&format!("/api/tenants/{id}")).await?;
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&tenant)?);
             } else {
@@ -133,8 +131,9 @@ pub async fn run(args: TenantArgs) -> anyhow::Result<()> {
         }
         TenantCommand::Disable { id } => {
             let body = serde_json::json!({ "status": "disabled" });
-            let tenant: TenantResponse =
-                client.put(&format!("/api/tenants/{id}/status"), &body).await?;
+            let tenant: TenantResponse = client
+                .put(&format!("/api/tenants/{id}/status"), &body)
+                .await?;
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&tenant)?);
             } else {
@@ -143,8 +142,9 @@ pub async fn run(args: TenantArgs) -> anyhow::Result<()> {
         }
         TenantCommand::Enable { id } => {
             let body = serde_json::json!({ "status": "active" });
-            let tenant: TenantResponse =
-                client.put(&format!("/api/tenants/{id}/status"), &body).await?;
+            let tenant: TenantResponse = client
+                .put(&format!("/api/tenants/{id}/status"), &body)
+                .await?;
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&tenant)?);
             } else {

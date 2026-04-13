@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -72,6 +72,7 @@ const INTERNAL_ERROR: i32 = -32603;
 pub async fn handle_mcp_request(
     State(state): State<Arc<crate::server::AppState>>,
     Path(params): Path<(String, String)>,
+    headers: HeaderMap,
     Json(rpc_req): Json<JsonRpcRequest>,
 ) -> Result<Json<JsonRpcResponse>, StatusCode> {
     let (tenant_slug, agent_slug) = params;
@@ -95,13 +96,20 @@ pub async fn handle_mcp_request(
     // All DB work happens in spawn_blocking
     let state_clone = Arc::clone(&state);
     let rpc_clone = rpc_req.clone();
+    let access_token = bearer_token(&headers).map(str::to_string);
 
     let response = tokio::task::spawn_blocking(move || {
-        handle_mcp_sync(&state_clone, &tenant_slug, &agent_slug, &rpc_clone)
+        handle_mcp_sync(
+            &state_clone,
+            &tenant_slug,
+            &agent_slug,
+            access_token.as_deref(),
+            &rpc_clone,
+        )
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|status| status)?;
 
     Ok(Json(response))
 }
@@ -111,21 +119,32 @@ fn handle_mcp_sync(
     state: &crate::server::AppState,
     tenant_slug: &str,
     agent_slug: &str,
+    access_token: Option<&str>,
     rpc_req: &JsonRpcRequest,
-) -> anyhow::Result<JsonRpcResponse> {
+) -> Result<JsonRpcResponse, StatusCode> {
     // Resolve tenant
     let tenant = {
         let conn = state.platform_store.conn();
-        crate::store::models::Tenant::get_by_slug(&conn, tenant_slug)?
-            .ok_or_else(|| anyhow::anyhow!("Tenant not found"))?
+        crate::store::models::Tenant::get_by_slug(&conn, tenant_slug)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .ok_or(StatusCode::NOT_FOUND)?
     };
 
-    let tenant_store = state.open_tenant_store(&tenant.id)?;
+    let tenant_store = state
+        .open_tenant_store(&tenant.id)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let conn = tenant_store.conn();
+    let session = match access_token {
+        Some(token) => crate::server::mcp::session::validate_session(conn, token)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+        None => None,
+    }
+    .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Resolve agent
-    let agent = resolve_agent_by_slug(conn, tenant.id, agent_slug)?
-        .ok_or_else(|| anyhow::anyhow!("Agent not found"))?;
+    let agent = resolve_agent_by_slug(conn, tenant.id, agent_slug)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
 
     // Dispatch based on method
     let response = match rpc_req.method.as_str() {
@@ -138,7 +157,7 @@ fn handle_mcp_sync(
             state,
             &agent,
             &tenant,
-            "mcp-user", // TODO: resolve from MCP session
+            &session.user_identity,
             rpc_req.params.clone(),
             rpc_req.id.clone(),
         ),
@@ -151,6 +170,16 @@ fn handle_mcp_sync(
     };
 
     Ok(response)
+}
+
+fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    let raw = headers
+        .get(axum::http::header::AUTHORIZATION)?
+        .to_str()
+        .ok()?;
+    raw.strip_prefix("Bearer ")
+        .or_else(|| raw.strip_prefix("bearer "))
+        .map(str::trim)
 }
 
 fn resolve_agent_by_slug(

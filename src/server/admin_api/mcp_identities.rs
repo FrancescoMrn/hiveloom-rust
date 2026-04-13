@@ -22,38 +22,46 @@ pub struct CreateMcpIdentityRequest {
 
 pub async fn create_mcp_identity(
     State(state): State<Arc<crate::server::AppState>>,
-    Path(tid): Path<String>,
+    Path(tid_str): Path<String>,
     Json(body): Json<CreateMcpIdentityRequest>,
 ) -> impl IntoResponse {
-    let tenant_id: uuid::Uuid = match tid.parse() {
+    let tenant_id = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
         Ok(id) => id,
-        Err(_) => return err_json(StatusCode::BAD_REQUEST, "Invalid tenant id").into_response(),
+        Err(e) => return e.into_response(),
     };
 
     let tenant_store = match state.open_tenant_store(&tenant_id) {
         Ok(s) => s,
-        Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+        Err(e) => {
+            return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
+        }
     };
     let conn = tenant_store.conn();
 
     match McpIdentity::create(conn, tenant_id, &body.name) {
-        Ok(identity) => (StatusCode::CREATED, Json(serde_json::to_value(identity).unwrap())).into_response(),
+        Ok(identity) => (
+            StatusCode::CREATED,
+            Json(serde_json::to_value(identity).unwrap()),
+        )
+            .into_response(),
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
     }
 }
 
 pub async fn list_mcp_identities(
     State(state): State<Arc<crate::server::AppState>>,
-    Path(tid): Path<String>,
+    Path(tid_str): Path<String>,
 ) -> impl IntoResponse {
-    let tenant_id: uuid::Uuid = match tid.parse() {
+    let tenant_id = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
         Ok(id) => id,
-        Err(_) => return err_json(StatusCode::BAD_REQUEST, "Invalid tenant id").into_response(),
+        Err(e) => return e.into_response(),
     };
 
     let tenant_store = match state.open_tenant_store(&tenant_id) {
         Ok(s) => s,
-        Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+        Err(e) => {
+            return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
+        }
     };
     let conn = tenant_store.conn();
 
@@ -65,11 +73,11 @@ pub async fn list_mcp_identities(
 
 pub async fn get_mcp_identity(
     State(state): State<Arc<crate::server::AppState>>,
-    Path((tid, mid)): Path<(String, String)>,
+    Path((tid_str, mid)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    let tenant_id: uuid::Uuid = match tid.parse() {
+    let tenant_id = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
         Ok(id) => id,
-        Err(_) => return err_json(StatusCode::BAD_REQUEST, "Invalid tenant id").into_response(),
+        Err(e) => return e.into_response(),
     };
     let identity_id: uuid::Uuid = match mid.parse() {
         Ok(id) => id,
@@ -78,7 +86,9 @@ pub async fn get_mcp_identity(
 
     let tenant_store = match state.open_tenant_store(&tenant_id) {
         Ok(s) => s,
-        Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+        Err(e) => {
+            return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
+        }
     };
     let conn = tenant_store.conn();
 
@@ -98,12 +108,12 @@ pub struct MapPersonRequest {
 
 pub async fn map_person(
     State(state): State<Arc<crate::server::AppState>>,
-    Path((tid, mid)): Path<(String, String)>,
+    Path((tid_str, mid)): Path<(String, String)>,
     Json(body): Json<MapPersonRequest>,
 ) -> impl IntoResponse {
-    let tenant_id: uuid::Uuid = match tid.parse() {
+    let tenant_id = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
         Ok(id) => id,
-        Err(_) => return err_json(StatusCode::BAD_REQUEST, "Invalid tenant id").into_response(),
+        Err(e) => return e.into_response(),
     };
     let identity_id: uuid::Uuid = match mid.parse() {
         Ok(id) => id,
@@ -112,7 +122,9 @@ pub async fn map_person(
 
     let tenant_store = match state.open_tenant_store(&tenant_id) {
         Ok(s) => s,
-        Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+        Err(e) => {
+            return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
+        }
     };
     let conn = tenant_store.conn();
 
@@ -124,11 +136,11 @@ pub async fn map_person(
 
 pub async fn unmap_person(
     State(state): State<Arc<crate::server::AppState>>,
-    Path((tid, mid)): Path<(String, String)>,
+    Path((tid_str, mid)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    let tenant_id: uuid::Uuid = match tid.parse() {
+    let tenant_id = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
         Ok(id) => id,
-        Err(_) => return err_json(StatusCode::BAD_REQUEST, "Invalid tenant id").into_response(),
+        Err(e) => return e.into_response(),
     };
     let identity_id: uuid::Uuid = match mid.parse() {
         Ok(id) => id,
@@ -137,7 +149,9 @@ pub async fn unmap_person(
 
     let tenant_store = match state.open_tenant_store(&tenant_id) {
         Ok(s) => s,
-        Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+        Err(e) => {
+            return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
+        }
     };
     let conn = tenant_store.conn();
 
@@ -151,11 +165,11 @@ pub async fn unmap_person(
 
 pub async fn revoke_mcp_identity(
     State(state): State<Arc<crate::server::AppState>>,
-    Path((tid, mid)): Path<(String, String)>,
+    Path((tid_str, mid)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    let tenant_id: uuid::Uuid = match tid.parse() {
+    let tenant_id = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
         Ok(id) => id,
-        Err(_) => return err_json(StatusCode::BAD_REQUEST, "Invalid tenant id").into_response(),
+        Err(e) => return e.into_response(),
     };
     let identity_id: uuid::Uuid = match mid.parse() {
         Ok(id) => id,
@@ -164,7 +178,9 @@ pub async fn revoke_mcp_identity(
 
     let tenant_store = match state.open_tenant_store(&tenant_id) {
         Ok(s) => s,
-        Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+        Err(e) => {
+            return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
+        }
     };
     let conn = tenant_store.conn();
 
@@ -176,7 +192,9 @@ pub async fn revoke_mcp_identity(
     // Revoke all client registrations for this identity
     let registrations = match McpClientRegistration::list_by_identity(conn, identity_id) {
         Ok(r) => r,
-        Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+        Err(e) => {
+            return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
+        }
     };
 
     for reg in registrations {
@@ -192,11 +210,11 @@ pub async fn revoke_mcp_identity(
 
 pub async fn reissue_setup_code(
     State(state): State<Arc<crate::server::AppState>>,
-    Path((tid, mid)): Path<(String, String)>,
+    Path((tid_str, mid)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    let tenant_id: uuid::Uuid = match tid.parse() {
+    let tenant_id = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
         Ok(id) => id,
-        Err(_) => return err_json(StatusCode::BAD_REQUEST, "Invalid tenant id").into_response(),
+        Err(e) => return e.into_response(),
     };
     let identity_id: uuid::Uuid = match mid.parse() {
         Ok(id) => id,
@@ -205,7 +223,9 @@ pub async fn reissue_setup_code(
 
     let tenant_store = match state.open_tenant_store(&tenant_id) {
         Ok(s) => s,
-        Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+        Err(e) => {
+            return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
+        }
     };
     let conn = tenant_store.conn();
 

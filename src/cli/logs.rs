@@ -6,7 +6,7 @@ use super::client::ApiClient;
 #[derive(Args)]
 pub struct LogsArgs {
     /// Tenant slug
-    #[arg(long, default_value = "default")]
+    #[arg(long, default_value_t = crate::cli::local::default_tenant())]
     pub tenant: String,
 
     /// Agent ID to filter logs
@@ -33,7 +33,7 @@ pub struct LogsArgs {
 #[derive(Args)]
 pub struct TailArgs {
     /// Tenant slug
-    #[arg(long, default_value = "default")]
+    #[arg(long, default_value_t = crate::cli::local::default_tenant())]
     pub tenant: String,
 
     /// Agent ID to filter logs

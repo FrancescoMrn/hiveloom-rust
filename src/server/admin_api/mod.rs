@@ -1,10 +1,10 @@
 use axum::{
-    Router,
     extract::Request,
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, patch, post, put},
+    Json, Router,
 };
 use std::sync::Arc;
 
@@ -28,202 +28,254 @@ pub struct AuthContext {
     pub scope: String,
 }
 
+/// Resolve a tenant identifier (UUID or slug) to a tenant UUID.
+pub fn resolve_tenant_id(
+    platform_store: &crate::store::PlatformStore,
+    tid_or_slug: &str,
+) -> Result<uuid::Uuid, (StatusCode, Json<serde_json::Value>)> {
+    // Try UUID parse first
+    if let Ok(id) = uuid::Uuid::parse_str(tid_or_slug) {
+        return Ok(id);
+    }
+    // Fall back to slug lookup
+    let conn = platform_store.conn();
+    match crate::store::models::Tenant::get_by_slug(&conn, tid_or_slug) {
+        Ok(Some(t)) => Ok(t.id),
+        Ok(None) => Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Tenant not found"})),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )),
+    }
+}
+
+/// Resolve an agent identifier (UUID or name) to an agent UUID.
+pub fn resolve_agent_id(
+    tenant_store: &crate::store::TenantStore,
+    tenant_id: uuid::Uuid,
+    aid_or_name: &str,
+) -> Result<uuid::Uuid, (StatusCode, Json<serde_json::Value>)> {
+    if let Ok(id) = uuid::Uuid::parse_str(aid_or_name) {
+        return Ok(id);
+    }
+    let conn = tenant_store.conn();
+    let agents = crate::store::models::Agent::list_current(conn, tenant_id).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+    })?;
+    match agents
+        .into_iter()
+        .find(|a| a.name.eq_ignore_ascii_case(aid_or_name))
+    {
+        Some(a) => Ok(a.id),
+        None => Err((
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Agent not found"})),
+        )),
+    }
+}
+
 pub fn router(state: Arc<super::AppState>) -> Router<Arc<super::AppState>> {
     Router::new()
         // ── Tenant routes (T044) ────────────────────────────────────────
         .route("/tenants", post(tenants::create_tenant))
         .route("/tenants", get(tenants::list_tenants))
-        .route("/tenants/{tid}", get(tenants::get_tenant))
-        .route("/tenants/{tid}", put(tenants::update_tenant))
-        .route("/tenants/{tid}", delete(tenants::delete_tenant))
+        .route("/tenants/:tid", get(tenants::get_tenant))
+        .route("/tenants/:tid", put(tenants::update_tenant))
+        .route("/tenants/:tid", delete(tenants::delete_tenant))
         // ── Agent routes (T041) ─────────────────────────────────────────
-        .route("/tenants/{tid}/agents", post(agents::create_agent))
-        .route("/tenants/{tid}/agents", get(agents::list_agents))
-        .route("/tenants/{tid}/agents/{aid}", get(agents::get_agent))
-        .route("/tenants/{tid}/agents/{aid}", put(agents::update_agent))
-        .route("/tenants/{tid}/agents/{aid}", delete(agents::delete_agent))
+        .route("/tenants/:tid/agents", post(agents::create_agent))
+        .route("/tenants/:tid/agents", get(agents::list_agents))
+        .route("/tenants/:tid/agents/:aid", get(agents::get_agent))
+        .route("/tenants/:tid/agents/:aid", put(agents::update_agent))
+        .route("/tenants/:tid/agents/:aid", delete(agents::delete_agent))
         .route(
-            "/tenants/{tid}/agents/{aid}/versions",
+            "/tenants/:tid/agents/:aid/versions",
             get(agents::list_versions),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/rollback",
+            "/tenants/:tid/agents/:aid/rollback",
             post(agents::rollback_agent),
         )
         // ── Capability routes (T042) ────────────────────────────────────
         .route(
-            "/tenants/{tid}/agents/{aid}/capabilities",
+            "/tenants/:tid/agents/:aid/capabilities",
             post(capabilities::create_capability),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/capabilities",
+            "/tenants/:tid/agents/:aid/capabilities",
             get(capabilities::list_capabilities),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/capabilities/{cid}",
+            "/tenants/:tid/agents/:aid/capabilities/:cid",
             get(capabilities::get_capability),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/capabilities/{cid}",
+            "/tenants/:tid/agents/:aid/capabilities/:cid",
             put(capabilities::update_capability),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/capabilities/{cid}",
+            "/tenants/:tid/agents/:aid/capabilities/:cid",
             delete(capabilities::delete_capability),
         )
         // ── Credential routes (T043) ────────────────────────────────────
-        .route("/tenants/{tid}/credentials", post(credentials::set_credential))
-        .route("/tenants/{tid}/credentials", get(credentials::list_credentials))
+        .route("/tenants/:tid/credentials", post(credentials::set_credential))
+        .route("/tenants/:tid/credentials", get(credentials::list_credentials))
         .route(
-            "/tenants/{tid}/credentials/{name}",
+            "/tenants/:tid/credentials/:name",
             delete(credentials::delete_credential),
         )
         .route(
-            "/tenants/{tid}/credentials/{name}/rotate",
+            "/tenants/:tid/credentials/:name/rotate",
             post(credentials::rotate_credential),
         )
         // ── ChatSurfaceBinding routes (T045) ────────────────────────────
         .route(
-            "/tenants/{tid}/agents/{aid}/bindings",
+            "/tenants/:tid/agents/:aid/bindings",
             post(agents::create_binding),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/bindings",
+            "/tenants/:tid/agents/:aid/bindings",
             get(agents::list_bindings),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/bindings/{bid}",
+            "/tenants/:tid/agents/:aid/bindings/:bid",
             delete(agents::delete_binding),
         )
         // ── Scheduled Job routes (T059) ────────────────────────────────
         .route(
-            "/tenants/{tid}/agents/{aid}/scheduled-jobs",
+            "/tenants/:tid/agents/:aid/scheduled-jobs",
             post(scheduled_jobs::create_scheduled_job),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/scheduled-jobs",
+            "/tenants/:tid/agents/:aid/scheduled-jobs",
             get(scheduled_jobs::list_scheduled_jobs),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/scheduled-jobs/{jid}",
+            "/tenants/:tid/agents/:aid/scheduled-jobs/:jid",
             get(scheduled_jobs::get_scheduled_job),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/scheduled-jobs/{jid}",
+            "/tenants/:tid/agents/:aid/scheduled-jobs/:jid",
             put(scheduled_jobs::update_scheduled_job),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/scheduled-jobs/{jid}",
+            "/tenants/:tid/agents/:aid/scheduled-jobs/:jid",
             delete(scheduled_jobs::delete_scheduled_job),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/scheduled-jobs/{jid}/pause",
+            "/tenants/:tid/agents/:aid/scheduled-jobs/:jid/pause",
             post(scheduled_jobs::pause_scheduled_job),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/scheduled-jobs/{jid}/resume",
+            "/tenants/:tid/agents/:aid/scheduled-jobs/:jid/resume",
             post(scheduled_jobs::resume_scheduled_job),
         )
         // ── Event Subscription routes (T066) ───────────────────────────
         .route(
-            "/tenants/{tid}/agents/{aid}/event-subscriptions",
+            "/tenants/:tid/agents/:aid/event-subscriptions",
             post(event_subscriptions::create_event_subscription),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/event-subscriptions",
+            "/tenants/:tid/agents/:aid/event-subscriptions",
             get(event_subscriptions::list_event_subscriptions),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/event-subscriptions/{sid}",
+            "/tenants/:tid/agents/:aid/event-subscriptions/:sid",
             get(event_subscriptions::get_event_subscription),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/event-subscriptions/{sid}",
+            "/tenants/:tid/agents/:aid/event-subscriptions/:sid",
             delete(event_subscriptions::delete_event_subscription),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/event-subscriptions/{sid}/disable",
+            "/tenants/:tid/agents/:aid/event-subscriptions/:sid/disable",
             post(event_subscriptions::disable_event_subscription),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/event-subscriptions/{sid}/enable",
+            "/tenants/:tid/agents/:aid/event-subscriptions/:sid/enable",
             post(event_subscriptions::enable_event_subscription),
         )
         // ── MCP Identity routes (T089) ────────────────────────────────
         .route(
-            "/tenants/{tid}/mcp-identities",
+            "/tenants/:tid/mcp-identities",
             post(mcp_identities::create_mcp_identity),
         )
         .route(
-            "/tenants/{tid}/mcp-identities",
+            "/tenants/:tid/mcp-identities",
             get(mcp_identities::list_mcp_identities),
         )
         .route(
-            "/tenants/{tid}/mcp-identities/{mid}",
+            "/tenants/:tid/mcp-identities/:mid",
             get(mcp_identities::get_mcp_identity),
         )
         .route(
-            "/tenants/{tid}/mcp-identities/{mid}/map",
+            "/tenants/:tid/mcp-identities/:mid/map",
             post(mcp_identities::map_person),
         )
         .route(
-            "/tenants/{tid}/mcp-identities/{mid}/unmap",
+            "/tenants/:tid/mcp-identities/:mid/unmap",
             post(mcp_identities::unmap_person),
         )
         .route(
-            "/tenants/{tid}/mcp-identities/{mid}/revoke",
+            "/tenants/:tid/mcp-identities/:mid/revoke",
             post(mcp_identities::revoke_mcp_identity),
         )
         .route(
-            "/tenants/{tid}/mcp-identities/{mid}/reissue-setup-code",
+            "/tenants/:tid/mcp-identities/:mid/reissue-setup-code",
             post(mcp_identities::reissue_setup_code),
         )
         // ── Auth token routes (T101) ──────────────────────────────────
         .route("/auth/tokens", post(auth_tokens::create_token))
         .route("/auth/tokens", get(auth_tokens::list_tokens))
-        .route("/auth/tokens/{id}", delete(auth_tokens::revoke_token))
+        .route("/auth/tokens/:id", delete(auth_tokens::revoke_token))
         // ── Backup routes (T095) ──────────────────────────────────────
         .route("/backups", post(backups::create_backup))
         .route("/backups", get(backups::list_backups))
         .route("/backups/restore", post(backups::restore_backup))
         // ── Reflection routes (T097-T100) ─────────────────────────────
         .route(
-            "/tenants/{tid}/agents/{aid}/reflect",
+            "/tenants/:tid/agents/:aid/reflect",
             post(reflections::trigger_reflection),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/reflections",
+            "/tenants/:tid/agents/:aid/reflections",
             get(reflections::list_reflections),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/reflections/{rid}",
+            "/tenants/:tid/agents/:aid/reflections/:rid",
             get(reflections::get_reflection),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/reflections/{rid}",
+            "/tenants/:tid/agents/:aid/reflections/:rid",
             delete(reflections::delete_reflection),
         )
         // ── Memory promotion (T108) ───────────────────────────────────
         .route(
-            "/tenants/{tid}/agents/{aid}/memory/promote",
+            "/tenants/:tid/agents/:aid/memory/promote",
             post(reflections::promote_memory),
         )
         // ── User offboarding (T109) ───────────────────────────────────
         .route(
-            "/tenants/{tid}/agents/{aid}/users/{uid}/offboard",
+            "/tenants/:tid/agents/:aid/users/:uid/offboard",
             post(reflections::offboard_user),
         )
         // ── Compaction routes (T022, T023) ────────────────────────────
         .route(
-            "/tenants/{tid}/compaction-events",
+            "/tenants/:tid/compaction-events",
             get(compaction::list_compaction_events),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/compaction-config",
+            "/tenants/:tid/agents/:aid/compaction-config",
             get(compaction::get_compaction_config),
         )
         .route(
-            "/tenants/{tid}/agents/{aid}/compaction-config",
+            "/tenants/:tid/agents/:aid/compaction-config",
             patch(compaction::patch_compaction_config),
         )
         // ── Auth middleware ─────────────────────────────────────────────
@@ -273,7 +325,7 @@ async fn auth_middleware_inner(
     };
 
     // Hash the token and validate against the platform store
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
 
     // Scope the MutexGuard so it is dropped before any .await

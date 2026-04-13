@@ -105,9 +105,7 @@ impl CompactionEvent {
         let mut stmt = conn.prepare(&sql)?;
 
         // Build params dynamically
-        let mut p: Vec<Box<dyn rusqlite::types::ToSql>> = vec![
-            Box::new(tenant_id.to_string()),
-        ];
+        let mut p: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(tenant_id.to_string())];
         if let Some(aid) = agent_id {
             p.push(Box::new(aid.to_string()));
         }

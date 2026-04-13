@@ -15,8 +15,7 @@ pub struct ReflectionReport {
     pub created_at: String,
 }
 
-const SELECT_COLS: &str =
-    "id, tenant_id, agent_id, trigger, window_start, window_end, \
+const SELECT_COLS: &str = "id, tenant_id, agent_id, trigger, window_start, window_end, \
      skill_suggestions, memory_suggestions, created_at";
 
 fn row_to_report(row: &rusqlite::Row) -> rusqlite::Result<ReflectionReport> {
@@ -78,7 +77,10 @@ impl ReflectionReport {
     }
 
     pub fn get(conn: &Connection, id: Uuid) -> Result<Option<ReflectionReport>> {
-        let sql = format!("SELECT {} FROM reflection_reports WHERE id = ?1", SELECT_COLS);
+        let sql = format!(
+            "SELECT {} FROM reflection_reports WHERE id = ?1",
+            SELECT_COLS
+        );
         let mut stmt = conn.prepare(&sql)?;
         let mut rows = stmt.query_map(params![id.to_string()], row_to_report)?;
         match rows.next() {

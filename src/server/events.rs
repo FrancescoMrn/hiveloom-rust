@@ -28,10 +28,7 @@ pub async fn handle_inbound_event(
     Json(body): Json<InboundEventPayload>,
 ) -> impl IntoResponse {
     // Extract auth token from Authorization header
-    let auth_token = match headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-    {
+    let auth_token = match headers.get("authorization").and_then(|v| v.to_str().ok()) {
         Some(h) if h.starts_with("Bearer ") => h[7..].to_string(),
         _ => {
             return (
@@ -45,12 +42,17 @@ pub async fn handle_inbound_event(
     if let Some(ref delivery_id) = body.delivery_id {
         if let Ok(tenant_store) = state.open_tenant_store(&tid) {
             let conn = tenant_store.conn();
-            match state.dedup.check_and_record(conn, delivery_id, &tid, "event") {
+            match state
+                .dedup
+                .check_and_record(conn, delivery_id, &tid, "event")
+            {
                 Ok(false) => {
                     // Duplicate
                     return (
                         StatusCode::OK,
-                        Json(serde_json::json!({ "status": "duplicate", "delivery_id": delivery_id })),
+                        Json(
+                            serde_json::json!({ "status": "duplicate", "delivery_id": delivery_id }),
+                        ),
                     );
                 }
                 Ok(true) => { /* new delivery, proceed */ }

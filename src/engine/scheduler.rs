@@ -61,10 +61,11 @@ impl JobScheduler {
                     Err(_) => continue,
                 };
 
-                let store = match TenantStore::open(std::path::Path::new(&self.data_dir), &tenant_id) {
-                    Ok(s) => s,
-                    Err(_) => continue,
-                };
+                let store =
+                    match TenantStore::open(std::path::Path::new(&self.data_dir), &tenant_id) {
+                        Ok(s) => s,
+                        Err(_) => continue,
+                    };
                 let conn = store.conn();
 
                 // First, ensure all active jobs have a computed next_fire_at
@@ -74,10 +75,15 @@ impl JobScheduler {
                             if let Some(ref cron_expr) = job.cron_expression {
                                 if let Ok(next) = compute_next_fire(cron_expr, &job.timezone, now) {
                                     let next_str = next.to_rfc3339();
-                                    let _ = ScheduledJob::update_next_fire(conn, job.id, Some(&next_str));
+                                    let _ = ScheduledJob::update_next_fire(
+                                        conn,
+                                        job.id,
+                                        Some(&next_str),
+                                    );
                                 }
                             } else if let Some(ref one_time) = job.one_time_at {
-                                let _ = ScheduledJob::update_next_fire(conn, job.id, Some(one_time));
+                                let _ =
+                                    ScheduledJob::update_next_fire(conn, job.id, Some(one_time));
                             }
                         }
                     }
@@ -112,7 +118,8 @@ impl JobScheduler {
                         match compute_next_fire(cron_expr, &job.timezone, now) {
                             Ok(next) => {
                                 let next_str = next.to_rfc3339();
-                                let _ = ScheduledJob::update_next_fire(conn, job.id, Some(&next_str));
+                                let _ =
+                                    ScheduledJob::update_next_fire(conn, job.id, Some(&next_str));
 
                                 // Track for earliest next
                                 match earliest_next {
@@ -176,7 +183,9 @@ impl JobScheduler {
             // Sleep until next job is due, or a default poll interval
             let sleep_dur = match earliest_next {
                 Some(next) => {
-                    let dur = (next - Utc::now()).to_std().unwrap_or(std::time::Duration::from_secs(1));
+                    let dur = (next - Utc::now())
+                        .to_std()
+                        .unwrap_or(std::time::Duration::from_secs(1));
                     // Cap at 60 seconds to allow for newly-created jobs
                     dur.min(std::time::Duration::from_secs(60))
                 }
@@ -197,7 +206,8 @@ pub fn compute_next_fire(
     let tz: chrono_tz::Tz = timezone
         .parse()
         .map_err(|e| anyhow::anyhow!("Invalid timezone '{}': {}", timezone, e))?;
-    let schedule = Schedule::from_str(cron_expr)
+    let normalized = normalize_cron_expression(cron_expr)?;
+    let schedule = Schedule::from_str(&normalized)
         .map_err(|e| anyhow::anyhow!("Invalid cron expression '{}': {}", cron_expr, e))?;
     let after_in_tz = after.with_timezone(&tz);
     let next = schedule
@@ -207,12 +217,28 @@ pub fn compute_next_fire(
     Ok(next.with_timezone(&Utc))
 }
 
+fn normalize_cron_expression(cron_expr: &str) -> anyhow::Result<String> {
+    let fields: Vec<&str> = cron_expr.split_whitespace().collect();
+    match fields.len() {
+        5 => Ok(format!("0 {}", fields.join(" "))),
+        6 => Ok(fields.join(" ")),
+        n => anyhow::bail!(
+            "Invalid cron expression '{}': expected 5 fields (standard cron) or 6 fields (with seconds), got {}",
+            cron_expr,
+            n
+        ),
+    }
+}
+
 /// T033, T034: Clean up expired compaction artifacts (30-day retention).
 fn run_compaction_retention(conn: &rusqlite::Connection) {
     // T033: Delete expired raw turn archive entries
     match cleanup_expired_archives(conn) {
         Ok(count) if count > 0 => {
-            tracing::debug!(deleted = count, "Cleaned up expired raw turn archive entries");
+            tracing::debug!(
+                deleted = count,
+                "Cleaned up expired raw turn archive entries"
+            );
         }
         Err(e) => {
             tracing::warn!(error = %e, "Failed to clean up raw turn archive");
@@ -235,11 +261,7 @@ fn run_compaction_retention(conn: &rusqlite::Connection) {
 
 /// T061: Fire a single scheduled job: open tenant store, load agent, create
 /// a synthetic internal conversation, and run the agent loop.
-async fn fire_job(
-    data_dir: &str,
-    job: &ScheduledJob,
-    tenant_id: &Uuid,
-) -> anyhow::Result<()> {
+async fn fire_job(data_dir: &str, job: &ScheduledJob, tenant_id: &Uuid) -> anyhow::Result<()> {
     tracing::info!(
         job_id = %job.id,
         agent_id = %job.agent_id,
@@ -262,15 +284,16 @@ async fn fire_job(
         conn,
         *tenant_id,
         job.agent_id,
-        "internal",                                    // surface_type
-        &format!("scheduled-job:{}", job.id),          // surface_ref
-        "system",                                       // user_identity
-        None,                                           // thread_ref
+        "internal",                           // surface_type
+        &format!("scheduled-job:{}", job.id), // surface_ref
+        "system",                             // user_identity
+        None,                                 // thread_ref
     )?;
 
     // Build initial context message
     let initial_message = if job.initial_context.is_empty() {
-        "You are running as a scheduled autonomous agent. Execute your configured tasks.".to_string()
+        "You are running as a scheduled autonomous agent. Execute your configured tasks."
+            .to_string()
     } else {
         job.initial_context.clone()
     };

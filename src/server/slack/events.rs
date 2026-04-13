@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::engine::agent_loop::{AgentInvocation, run_agent_loop};
+use crate::engine::agent_loop::{run_agent_loop, AgentInvocation};
 use crate::store::models::{
     Agent, Capability, ChatSurfaceBinding, Conversation, CredentialVaultEntry, Tenant,
 };
@@ -111,19 +111,19 @@ pub async fn dispatch_event(
         let thread_ref_val = thread_ts.as_deref().unwrap_or(&ts);
         let surface_key = format!("{}:{}", channel, thread_ref_val);
 
-        let conversation =
-            match Conversation::get_active_by_surface(conn, tenant_id, &surface_key)? {
-                Some(conv) => conv,
-                None => Conversation::create(
-                    conn,
-                    tenant_id,
-                    agent.id,
-                    "slack",
-                    &surface_key,
-                    &user,
-                    Some(thread_ref_val),
-                )?,
-            };
+        let conversation = match Conversation::get_active_by_surface(conn, tenant_id, &surface_key)?
+        {
+            Some(conv) => conv,
+            None => Conversation::create(
+                conn,
+                tenant_id,
+                agent.id,
+                "slack",
+                &surface_key,
+                &user,
+                Some(thread_ref_val),
+            )?,
+        };
 
         // 6. Resolve LLM credential
         let credential_name = if agent.model_id.starts_with("claude-") {
@@ -180,16 +180,22 @@ pub async fn dispatch_event(
     let tenant_id = ctx.tenant_id;
     let text_clone = event.text.clone();
 
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<crate::engine::InvocationResult> {
-        let tenant_store =
-            crate::store::TenantStore::open(std::path::Path::new(&data_dir2), &tenant_id)?;
-        let conn = tenant_store.conn();
+    let result =
+        tokio::task::spawn_blocking(move || -> anyhow::Result<crate::engine::InvocationResult> {
+            let tenant_store =
+                crate::store::TenantStore::open(std::path::Path::new(&data_dir2), &tenant_id)?;
+            let conn = tenant_store.conn();
 
-        // We need a runtime handle to run async LLM calls inside spawn_blocking
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(run_agent_loop(&invocation, provider.as_ref(), conn, &text_clone))
-    })
-    .await??;
+            // We need a runtime handle to run async LLM calls inside spawn_blocking
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(run_agent_loop(
+                &invocation,
+                provider.as_ref(),
+                conn,
+                &text_clone,
+            ))
+        })
+        .await??;
 
     // Phase 3: Post reply via Slack API (async)
     let surface = SlackSurface::new(bot_token);

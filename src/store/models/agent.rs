@@ -111,7 +111,8 @@ impl Agent {
             SELECT_COLS
         );
         let mut stmt = conn.prepare(&sql)?;
-        let mut rows = stmt.query_map(params![id.to_string(), tenant_id.to_string()], row_to_agent)?;
+        let mut rows =
+            stmt.query_map(params![id.to_string(), tenant_id.to_string()], row_to_agent)?;
         match rows.next() {
             Some(row) => Ok(Some(row?)),
             None => Ok(None),
@@ -160,14 +161,21 @@ impl Agent {
     }
 
     pub fn create_new_version(conn: &Connection, agent: &Agent) -> Result<Agent> {
+        let tx = conn.unchecked_transaction()?;
+
         // Flip old current to not-current
-        conn.execute(
+        tx.execute(
             "UPDATE agents SET is_current = 0 WHERE id = ?1 AND is_current = 1",
             params![agent.id.to_string()],
         )?;
 
         let now = chrono::Utc::now().to_rfc3339();
-        let new_version = agent.version + 1;
+        let max_version: i64 = tx.query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM agents WHERE id = ?1",
+            params![agent.id.to_string()],
+            |row| row.get(0),
+        )?;
+        let new_version = max_version + 1;
         let new_agent = Agent {
             id: agent.id,
             tenant_id: agent.tenant_id,
@@ -185,7 +193,7 @@ impl Agent {
             parent_version_id: Some(format!("{}@{}", agent.id, agent.version)),
             created_at: now,
         };
-        conn.execute(
+        tx.execute(
             "INSERT INTO agents (id, tenant_id, name, system_prompt, model_id, scope_mode,
              default_scope_policy, scope_coerce_policy, reflection_enabled, reflection_cron,
              status, version, is_current, parent_version_id, created_at)
@@ -208,12 +216,12 @@ impl Agent {
                 new_agent.created_at,
             ],
         )?;
+        tx.commit()?;
         Ok(new_agent)
     }
 
     pub fn rollback(conn: &Connection, id: Uuid, to_version: i64) -> Result<Agent> {
-        let old = Self::get_version(conn, id, to_version)?
-            .context("target version not found")?;
+        let old = Self::get_version(conn, id, to_version)?.context("target version not found")?;
         Self::create_new_version(conn, &old)
     }
 

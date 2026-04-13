@@ -95,7 +95,11 @@ impl ScheduledJob {
         }
     }
 
-    pub fn list_by_agent(conn: &Connection, tenant_id: Uuid, agent_id: Uuid) -> Result<Vec<ScheduledJob>> {
+    pub fn list_by_agent(
+        conn: &Connection,
+        tenant_id: Uuid,
+        agent_id: Uuid,
+    ) -> Result<Vec<ScheduledJob>> {
         let sql = format!(
             "SELECT {} FROM scheduled_jobs WHERE tenant_id = ?1 AND agent_id = ?2 ORDER BY created_at",
             SELECT_COLS

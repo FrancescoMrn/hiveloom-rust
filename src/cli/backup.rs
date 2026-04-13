@@ -64,9 +64,7 @@ pub async fn run(args: BackupArgs) -> anyhow::Result<()> {
                 "tenant": tenant,
                 "output": output,
             });
-            let result: serde_json::Value = client
-                .post("/api/backups", &body)
-                .await?;
+            let result: serde_json::Value = client.post("/api/backups", &body).await?;
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {
@@ -74,10 +72,7 @@ pub async fn run(args: BackupArgs) -> anyhow::Result<()> {
             }
         }
         BackupCommand::List => {
-            let backups: Vec<BackupInfo> = client
-                .get("/api/backups")
-                .await
-                .unwrap_or_default();
+            let backups: Vec<BackupInfo> = client.get("/api/backups").await.unwrap_or_default();
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&backups)?);
             } else if backups.is_empty() {
@@ -99,9 +94,7 @@ pub async fn run(args: BackupArgs) -> anyhow::Result<()> {
         }
         BackupCommand::Restore { input } => {
             let body = serde_json::json!({ "input": input });
-            let result: serde_json::Value = client
-                .post("/api/backups/restore", &body)
-                .await?;
+            let result: serde_json::Value = client.post("/api/backups/restore", &body).await?;
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&result)?);
             } else {

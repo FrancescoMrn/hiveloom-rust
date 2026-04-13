@@ -133,10 +133,7 @@ impl McpClientRegistration {
             SELECT_COLS
         );
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(
-            params![mcp_identity_id.to_string()],
-            row_to_registration,
-        )?;
+        let rows = stmt.query_map(params![mcp_identity_id.to_string()], row_to_registration)?;
         let mut entries = Vec::new();
         for row in rows {
             entries.push(row?);

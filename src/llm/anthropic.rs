@@ -1,4 +1,6 @@
-use crate::llm::provider::{LlmProvider, LlmResponse, Message, TokenUsage, ToolCall, ToolDefinition};
+use crate::llm::provider::{
+    LlmProvider, LlmResponse, Message, TokenUsage, ToolCall, ToolDefinition,
+};
 use serde_json::json;
 use tiktoken_rs::cl100k_base;
 
@@ -115,14 +117,8 @@ impl LlmProvider for AnthropicProvider {
                     }
                     Some("tool_use") => {
                         tool_calls.push(ToolCall {
-                            id: block["id"]
-                                .as_str()
-                                .unwrap_or_default()
-                                .to_string(),
-                            name: block["name"]
-                                .as_str()
-                                .unwrap_or_default()
-                                .to_string(),
+                            id: block["id"].as_str().unwrap_or_default().to_string(),
+                            name: block["name"].as_str().unwrap_or_default().to_string(),
                             arguments: block["input"].clone(),
                         });
                     }
@@ -138,12 +134,8 @@ impl LlmProvider for AnthropicProvider {
         };
 
         let usage = TokenUsage {
-            input_tokens: resp_body["usage"]["input_tokens"]
-                .as_u64()
-                .unwrap_or(0) as usize,
-            output_tokens: resp_body["usage"]["output_tokens"]
-                .as_u64()
-                .unwrap_or(0) as usize,
+            input_tokens: resp_body["usage"]["input_tokens"].as_u64().unwrap_or(0) as usize,
+            output_tokens: resp_body["usage"]["output_tokens"].as_u64().unwrap_or(0) as usize,
         };
 
         Ok(LlmResponse {

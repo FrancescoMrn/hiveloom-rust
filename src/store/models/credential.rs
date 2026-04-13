@@ -135,10 +135,7 @@ impl CredentialVaultEntry {
             SELECT_COLS
         );
         let mut stmt = conn.prepare(&sql)?;
-        let mut rows = stmt.query_map(
-            params![tenant_id.to_string(), name],
-            row_to_credential,
-        )?;
+        let mut rows = stmt.query_map(params![tenant_id.to_string(), name], row_to_credential)?;
         match rows.next() {
             Some(row) => Ok(Some(row?)),
             None => Ok(None),

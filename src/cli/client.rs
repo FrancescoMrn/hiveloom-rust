@@ -11,7 +11,7 @@ pub struct ApiClient {
 
 impl ApiClient {
     pub fn new(endpoint: Option<String>, token: Option<String>) -> Self {
-        let base_url = endpoint.unwrap_or_else(|| "http://127.0.0.1:3000".to_string());
+        let base_url = endpoint.unwrap_or_else(super::local::default_endpoint);
         Self {
             client: Client::new(),
             base_url,
@@ -84,7 +84,9 @@ impl ApiClient {
         path: &str,
         body: &B,
     ) -> Result<T> {
-        let req = self.apply_auth(self.client.patch(self.url(path))).json(body);
+        let req = self
+            .apply_auth(self.client.patch(self.url(path)))
+            .json(body);
         let resp = req.send().await.context("API request failed")?;
         let status = resp.status();
         if !status.is_success() {

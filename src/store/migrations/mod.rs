@@ -5,13 +5,16 @@ use rusqlite::params;
 /// Each migration is a `(name, sql)` pair. Already-applied migrations (tracked
 /// in the `_migrations` table) are skipped. Each new migration runs inside its
 /// own transaction.
-pub fn run_migrations(conn: &rusqlite::Connection, migrations: &[(&str, &str)]) -> anyhow::Result<()> {
+pub fn run_migrations(
+    conn: &rusqlite::Connection,
+    migrations: &[(&str, &str)],
+) -> anyhow::Result<()> {
     // Ensure the bookkeeping table exists (idempotent).
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _migrations (
             name TEXT PRIMARY KEY,
             applied_at TEXT NOT NULL
-        );"
+        );",
     )?;
 
     for (name, sql) in migrations {

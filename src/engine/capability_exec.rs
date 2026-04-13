@@ -74,10 +74,8 @@ fn check_missing_scopes(granted: Option<&str>, required: &[&str]) -> Vec<String>
         return Vec::new();
     }
 
-    let granted_set: std::collections::HashSet<&str> = granted
-        .unwrap_or("")
-        .split_whitespace()
-        .collect();
+    let granted_set: std::collections::HashSet<&str> =
+        granted.unwrap_or("").split_whitespace().collect();
 
     required
         .iter()
@@ -108,12 +106,8 @@ pub async fn execute_capability(
     // 2. Resolve credential and set auth header if auth_type != "none"
     if capability.auth_type != "none" {
         if let Some(ref cred_name) = capability.credential_ref {
-            let entry = CredentialVaultEntry::get_by_name(
-                conn,
-                *tenant_id,
-                cred_name,
-                Some(*agent_id),
-            )?;
+            let entry =
+                CredentialVaultEntry::get_by_name(conn, *tenant_id, cred_name, Some(*agent_id))?;
 
             if let Some(entry) = entry {
                 let decrypted = vault.decrypt(&entry.encrypted_value)?;
@@ -142,10 +136,8 @@ pub async fn execute_capability(
 
             if status.is_success() {
                 // Parse response as JSON, or wrap as string
-                let response_value: serde_json::Value =
-                    serde_json::from_str(&body_text).unwrap_or_else(|_| {
-                        serde_json::json!({ "result": body_text })
-                    });
+                let response_value: serde_json::Value = serde_json::from_str(&body_text)
+                    .unwrap_or_else(|_| serde_json::json!({ "result": body_text }));
 
                 // Log success
                 let _ = CapabilityInvocationLog::create(

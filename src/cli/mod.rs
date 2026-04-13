@@ -9,6 +9,7 @@ pub mod credential;
 pub mod event;
 pub mod health;
 pub mod interactive;
+pub mod local;
 pub mod logs;
 pub mod mcp_identity;
 pub mod schedule;

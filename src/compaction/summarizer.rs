@@ -196,11 +196,7 @@ impl Summarizer {
 
 /// Hard-truncate a summary by removing characters from the end until it fits.
 /// Preserves complete lines where possible.
-fn hard_truncate_summary(
-    summary: &str,
-    counter: &TokenCounter,
-    max_tokens: usize,
-) -> String {
+fn hard_truncate_summary(summary: &str, counter: &TokenCounter, max_tokens: usize) -> String {
     // Binary search for the right truncation point by lines
     let lines: Vec<&str> = summary.lines().collect();
     let mut lo = 0usize;

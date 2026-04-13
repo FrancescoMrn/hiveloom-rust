@@ -69,9 +69,13 @@ pub struct RotateCredentialRequest {
 
 pub async fn set_credential(
     State(state): State<Arc<super::super::AppState>>,
-    Path(tid): Path<uuid::Uuid>,
+    Path(tid_str): Path<String>,
     Json(body): Json<SetCredentialRequest>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     // Encrypt the value
     let encrypted = match state.vault.encrypt(body.value.as_bytes()) {
         Ok(e) => e,
@@ -97,7 +101,10 @@ pub async fn set_credential(
     ) {
         Ok(entry) => {
             let summary: CredentialSummary = entry.into();
-            (StatusCode::CREATED, Json(serde_json::to_value(summary).unwrap()))
+            (
+                StatusCode::CREATED,
+                Json(serde_json::to_value(summary).unwrap()),
+            )
         }
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
@@ -105,8 +112,12 @@ pub async fn set_credential(
 
 pub async fn list_credentials(
     State(state): State<Arc<super::super::AppState>>,
-    Path(tid): Path<uuid::Uuid>,
+    Path(tid_str): Path<String>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
@@ -114,9 +125,11 @@ pub async fn list_credentials(
     let conn = tenant_store.conn();
     match CredentialVaultEntry::list(conn, tid) {
         Ok(entries) => {
-            let summaries: Vec<CredentialSummary> =
-                entries.into_iter().map(|e| e.into()).collect();
-            (StatusCode::OK, Json(serde_json::to_value(summaries).unwrap()))
+            let summaries: Vec<CredentialSummary> = entries.into_iter().map(|e| e.into()).collect();
+            (
+                StatusCode::OK,
+                Json(serde_json::to_value(summaries).unwrap()),
+            )
         }
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
     }
@@ -124,8 +137,12 @@ pub async fn list_credentials(
 
 pub async fn delete_credential(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, name)): Path<(uuid::Uuid, String)>,
+    Path((tid_str, name)): Path<(String, String)>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
         Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
@@ -145,9 +162,13 @@ pub async fn delete_credential(
 
 pub async fn rotate_credential(
     State(state): State<Arc<super::super::AppState>>,
-    Path((tid, name)): Path<(uuid::Uuid, String)>,
+    Path((tid_str, name)): Path<(String, String)>,
     Json(body): Json<RotateCredentialRequest>,
 ) -> impl IntoResponse {
+    let tid = match super::resolve_tenant_id(&state.platform_store, &tid_str) {
+        Ok(id) => id,
+        Err(e) => return e,
+    };
     // Encrypt new value
     let encrypted = match state.vault.encrypt(body.value.as_bytes()) {
         Ok(e) => e,
