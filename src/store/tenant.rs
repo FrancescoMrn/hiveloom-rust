@@ -48,7 +48,7 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             id TEXT PRIMARY KEY,
             tenant_id TEXT NOT NULL,
             agent_id TEXT NOT NULL,
-            surface_type TEXT NOT NULL CHECK(surface_type IN ('slack','mcp')),
+            surface_type TEXT NOT NULL CHECK(surface_type IN ('slack','mcp','internal')),
             surface_ref TEXT NOT NULL,
             user_identity TEXT NOT NULL,
             thread_ref TEXT,
@@ -146,6 +146,100 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_invocation_logs_recent ON capability_invocation_logs(tenant_id, agent_id, created_at);
+    "#),
+    ("0010_create_scheduled_jobs", r#"
+        CREATE TABLE IF NOT EXISTS scheduled_jobs (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            cron_expression TEXT,
+            one_time_at TEXT,
+            timezone TEXT NOT NULL DEFAULT 'UTC',
+            initial_context TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused','disabled')),
+            last_fired_at TEXT,
+            next_fire_at TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_due ON scheduled_jobs(status, next_fire_at);
+    "#),
+    ("0011_create_event_subscriptions", r#"
+        CREATE TABLE IF NOT EXISTS event_subscriptions (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            source_filter TEXT,
+            auth_token_hash TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','disabled')),
+            created_at TEXT NOT NULL
+        );
+    "#),
+    // ── Phase 6: OAuth consent flow (T072) ─────────────────────────────
+    ("0012_create_oauth_authorization_requests", r#"
+        CREATE TABLE IF NOT EXISTS oauth_authorization_requests (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            user_identity TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            state_token TEXT NOT NULL UNIQUE,
+            requested_scopes TEXT,
+            paused_run_ref TEXT,
+            surface_type TEXT,
+            expires_at TEXT NOT NULL,
+            completed_at TEXT,
+            created_at TEXT NOT NULL
+        );
+    "#),
+    // ── Phase 6: MCP tables (T078) ─────────────────────────────────────
+    ("0013_create_mcp_identities", r#"
+        CREATE TABLE IF NOT EXISTS mcp_identities (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            mapped_person_id TEXT,
+            status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','disabled','revoked')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+    "#),
+    ("0014_create_mcp_client_registrations", r#"
+        CREATE TABLE IF NOT EXISTS mcp_client_registrations (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            mcp_identity_id TEXT NOT NULL REFERENCES mcp_identities(id),
+            client_id TEXT NOT NULL UNIQUE,
+            access_token_hash TEXT NOT NULL,
+            refresh_token_hash TEXT,
+            token_expires_at TEXT,
+            created_at TEXT NOT NULL,
+            revoked_at TEXT
+        );
+    "#),
+    // ── Phase 7: Reflection reports (T097) ──────────────────────────────
+    ("0016_create_reflection_reports", r#"
+        CREATE TABLE IF NOT EXISTS reflection_reports (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            trigger TEXT NOT NULL CHECK(trigger IN ('scheduled','manual')),
+            window_start TEXT NOT NULL,
+            window_end TEXT NOT NULL,
+            skill_suggestions TEXT NOT NULL DEFAULT '[]',
+            memory_suggestions TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL
+        );
+    "#),
+    ("0015_create_mcp_setup_codes", r#"
+        CREATE TABLE IF NOT EXISTS mcp_setup_codes (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            mcp_identity_id TEXT NOT NULL REFERENCES mcp_identities(id),
+            code_hash TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            used_at TEXT,
+            created_at TEXT NOT NULL
+        );
     "#),
 ];
 

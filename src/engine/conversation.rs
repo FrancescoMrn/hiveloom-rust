@@ -48,3 +48,24 @@ pub fn conclude_conversation(conn: &rusqlite::Connection, id: &uuid::Uuid) -> an
 pub fn abandon_conversation(conn: &rusqlite::Connection, id: &uuid::Uuid) -> anyhow::Result<()> {
     Conversation::update_status(conn, *id, "abandoned")
 }
+
+/// Background sweep: find conversations with no activity for `idle_hours` and conclude them (T069).
+pub fn sweep_idle_conversations(
+    conn: &rusqlite::Connection,
+    idle_hours: i64,
+) -> anyhow::Result<usize> {
+    let now = chrono::Utc::now();
+    let cutoff = now - chrono::Duration::hours(idle_hours);
+    let cutoff_str = cutoff.to_rfc3339();
+    let now_str = now.to_rfc3339();
+
+    let count = conn.execute(
+        "UPDATE conversations
+         SET status = 'concluded', concluded_at = ?1, updated_at = ?1
+         WHERE status = 'active'
+           AND updated_at < ?2",
+        rusqlite::params![now_str, cutoff_str],
+    )?;
+
+    Ok(count)
+}

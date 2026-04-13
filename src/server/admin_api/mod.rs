@@ -9,8 +9,14 @@ use axum::{
 use std::sync::Arc;
 
 pub mod agents;
+pub mod auth_tokens;
+pub mod backups;
 pub mod capabilities;
 pub mod credentials;
+pub mod event_subscriptions;
+pub mod mcp_identities;
+pub mod reflections;
+pub mod scheduled_jobs;
 pub mod tenants;
 
 /// Auth context stored in request extensions after the auth middleware runs.
@@ -87,6 +93,124 @@ pub fn router(state: Arc<super::AppState>) -> Router<Arc<super::AppState>> {
         .route(
             "/tenants/{tid}/agents/{aid}/bindings/{bid}",
             delete(agents::delete_binding),
+        )
+        // ── Scheduled Job routes (T059) ────────────────────────────────
+        .route(
+            "/tenants/{tid}/agents/{aid}/scheduled-jobs",
+            post(scheduled_jobs::create_scheduled_job),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/scheduled-jobs",
+            get(scheduled_jobs::list_scheduled_jobs),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/scheduled-jobs/{jid}",
+            get(scheduled_jobs::get_scheduled_job),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/scheduled-jobs/{jid}",
+            put(scheduled_jobs::update_scheduled_job),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/scheduled-jobs/{jid}",
+            delete(scheduled_jobs::delete_scheduled_job),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/scheduled-jobs/{jid}/pause",
+            post(scheduled_jobs::pause_scheduled_job),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/scheduled-jobs/{jid}/resume",
+            post(scheduled_jobs::resume_scheduled_job),
+        )
+        // ── Event Subscription routes (T066) ───────────────────────────
+        .route(
+            "/tenants/{tid}/agents/{aid}/event-subscriptions",
+            post(event_subscriptions::create_event_subscription),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/event-subscriptions",
+            get(event_subscriptions::list_event_subscriptions),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/event-subscriptions/{sid}",
+            get(event_subscriptions::get_event_subscription),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/event-subscriptions/{sid}",
+            delete(event_subscriptions::delete_event_subscription),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/event-subscriptions/{sid}/disable",
+            post(event_subscriptions::disable_event_subscription),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/event-subscriptions/{sid}/enable",
+            post(event_subscriptions::enable_event_subscription),
+        )
+        // ── MCP Identity routes (T089) ────────────────────────────────
+        .route(
+            "/tenants/{tid}/mcp-identities",
+            post(mcp_identities::create_mcp_identity),
+        )
+        .route(
+            "/tenants/{tid}/mcp-identities",
+            get(mcp_identities::list_mcp_identities),
+        )
+        .route(
+            "/tenants/{tid}/mcp-identities/{mid}",
+            get(mcp_identities::get_mcp_identity),
+        )
+        .route(
+            "/tenants/{tid}/mcp-identities/{mid}/map",
+            post(mcp_identities::map_person),
+        )
+        .route(
+            "/tenants/{tid}/mcp-identities/{mid}/unmap",
+            post(mcp_identities::unmap_person),
+        )
+        .route(
+            "/tenants/{tid}/mcp-identities/{mid}/revoke",
+            post(mcp_identities::revoke_mcp_identity),
+        )
+        .route(
+            "/tenants/{tid}/mcp-identities/{mid}/reissue-setup-code",
+            post(mcp_identities::reissue_setup_code),
+        )
+        // ── Auth token routes (T101) ──────────────────────────────────
+        .route("/auth/tokens", post(auth_tokens::create_token))
+        .route("/auth/tokens", get(auth_tokens::list_tokens))
+        .route("/auth/tokens/{id}", delete(auth_tokens::revoke_token))
+        // ── Backup routes (T095) ──────────────────────────────────────
+        .route("/backups", post(backups::create_backup))
+        .route("/backups", get(backups::list_backups))
+        .route("/backups/restore", post(backups::restore_backup))
+        // ── Reflection routes (T097-T100) ─────────────────────────────
+        .route(
+            "/tenants/{tid}/agents/{aid}/reflect",
+            post(reflections::trigger_reflection),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/reflections",
+            get(reflections::list_reflections),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/reflections/{rid}",
+            get(reflections::get_reflection),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/reflections/{rid}",
+            delete(reflections::delete_reflection),
+        )
+        // ── Memory promotion (T108) ───────────────────────────────────
+        .route(
+            "/tenants/{tid}/agents/{aid}/memory/promote",
+            post(reflections::promote_memory),
+        )
+        // ── User offboarding (T109) ───────────────────────────────────
+        .route(
+            "/tenants/{tid}/agents/{aid}/users/{uid}/offboard",
+            post(reflections::offboard_user),
         )
         // ── Auth middleware ─────────────────────────────────────────────
         .layer(middleware::from_fn(

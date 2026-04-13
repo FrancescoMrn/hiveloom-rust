@@ -5,10 +5,12 @@ pub mod backup;
 pub mod capability;
 pub mod client;
 pub mod credential;
+pub mod event;
 pub mod health;
 pub mod interactive;
 pub mod logs;
 pub mod mcp_identity;
+pub mod schedule;
 pub mod serve;
 pub mod tenant;
 pub mod top;
@@ -33,6 +35,10 @@ pub enum Command {
     Capability(capability::CapabilityArgs),
     /// Manage credentials
     Credential(credential::CredentialArgs),
+    /// Manage scheduled jobs
+    Schedule(schedule::ScheduleArgs),
+    /// Manage event subscriptions
+    Event(event::EventArgs),
     /// Manage tenants
     Tenant(tenant::TenantArgs),
     /// Manage authentication tokens
@@ -61,6 +67,8 @@ pub enum Command {
     Version,
     /// Manage backups
     Backup(backup::BackupArgs),
+    /// Interactive mode / first-run wizard
+    Interactive,
 }
 
 pub async fn dispatch(cli: Cli) -> anyhow::Result<()> {
@@ -69,6 +77,8 @@ pub async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Agent(args) => agent::run(args).await,
         Command::Capability(args) => capability::run(args).await,
         Command::Credential(args) => credential::run(args).await,
+        Command::Schedule(args) => schedule::run(args).await,
+        Command::Event(args) => event::run(args).await,
         Command::Tenant(args) => tenant::run(args).await,
         Command::Auth(args) => auth::run(args).await,
         Command::McpIdentity(args) => mcp_identity::run(args).await,
@@ -86,5 +96,6 @@ pub async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             Ok(())
         }
         Command::Backup(args) => backup::run(args).await,
+        Command::Interactive => interactive::run().await,
     }
 }

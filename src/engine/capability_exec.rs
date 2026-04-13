@@ -2,6 +2,90 @@ use crate::store::models::{Capability, CapabilityInvocationLog, CredentialVaultE
 use crate::store::Vault;
 use std::time::Instant;
 
+/// On 401, attempt to refresh the OAuth token using the stored refresh token (T076).
+/// Returns true if the token was refreshed successfully, false otherwise.
+async fn try_refresh_token(
+    conn: &rusqlite::Connection,
+    vault: &Vault,
+    credential: &CredentialVaultEntry,
+) -> anyhow::Result<bool> {
+    // Only applicable to delegated user tokens (OAuth)
+    if credential.kind != "delegated_user_token" {
+        return Ok(false);
+    }
+
+    let _provider = match &credential.provider {
+        Some(p) => p.clone(),
+        None => return Ok(false),
+    };
+
+    // Decrypt the current token to check if it contains refresh info
+    let decrypted = vault.decrypt(&credential.encrypted_value)?;
+    let token_str = String::from_utf8(decrypted)?;
+
+    // In a full implementation, the stored value would be a JSON object
+    // containing both access_token and refresh_token. For now, we check
+    // if it looks like it could be refreshed.
+    if !token_str.contains("refresh_token") {
+        // No refresh token available -- cannot silently refresh
+        return Ok(false);
+    }
+
+    // Parse the stored token JSON to extract refresh_token
+    let token_data: serde_json::Value = match serde_json::from_str(&token_str) {
+        Ok(v) => v,
+        Err(_) => return Ok(false),
+    };
+
+    let refresh_token = match token_data.get("refresh_token").and_then(|v| v.as_str()) {
+        Some(rt) => rt.to_string(),
+        None => return Ok(false),
+    };
+
+    // Attempt to refresh by calling the provider's token endpoint.
+    // This is a placeholder -- in production, provider config would be
+    // looked up from a registry.
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("https://{}/oauth/token", _provider))
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", &refresh_token),
+        ])
+        .send()
+        .await;
+
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            let body: serde_json::Value = r.json().await?;
+            let new_token_json = serde_json::to_string(&body)?;
+            let encrypted = vault.encrypt(new_token_json.as_bytes())?;
+            CredentialVaultEntry::update_encrypted_value(conn, credential.id, &encrypted)?;
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+/// Check if granted scopes cover all required scopes (T077).
+/// Returns a list of missing scopes, if any.
+fn check_missing_scopes(granted: Option<&str>, required: &[&str]) -> Vec<String> {
+    if required.is_empty() {
+        return Vec::new();
+    }
+
+    let granted_set: std::collections::HashSet<&str> = granted
+        .unwrap_or("")
+        .split_whitespace()
+        .collect();
+
+    required
+        .iter()
+        .filter(|s| !granted_set.contains(*s))
+        .map(|s| s.to_string())
+        .collect()
+}
+
 /// Execute a capability: resolve credential, build HTTP request, call endpoint, log result.
 pub async fn execute_capability(
     conn: &rusqlite::Connection,

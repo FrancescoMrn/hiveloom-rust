@@ -72,6 +72,13 @@ impl ApiClient {
         resp.json::<T>().await.context("failed to parse response")
     }
 
+    /// Perform a raw GET and return just the status code (for health checks).
+    pub async fn get_raw(&self, path: &str) -> Result<reqwest::StatusCode> {
+        let req = self.apply_auth(self.client.get(self.url(path)));
+        let resp = req.send().await.context("API request failed")?;
+        Ok(resp.status())
+    }
+
     pub async fn delete(&self, path: &str) -> Result<()> {
         let req = self.apply_auth(self.client.delete(self.url(path)));
         let resp = req.send().await.context("API request failed")?;
