@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::server::oauth::server as oauth_server;
-use crate::store::models::{McpClientRegistration, McpIdentity, McpSetupCode};
+use crate::store::models::{McpClientRegistration, McpSetupCode};
 
 // ── T085: Metadata endpoints ──────────────────────────────────────────
 

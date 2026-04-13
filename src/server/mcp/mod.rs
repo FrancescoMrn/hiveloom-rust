@@ -14,6 +14,14 @@ pub struct McpSurface {
     messages: std::sync::Mutex<Vec<String>>,
 }
 
+impl Default for McpSurface {
+    fn default() -> Self {
+        Self {
+            messages: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+}
+
 impl McpSurface {
     pub fn new() -> Self {
         Self {

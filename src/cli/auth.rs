@@ -88,8 +88,8 @@ pub async fn run(args: AuthArgs) -> anyhow::Result<()> {
                 println!("No auth tokens found.");
             } else {
                 println!(
-                    "{:<38} {:<20} {:<24} {:<24} {}",
-                    "ID", "SCOPE", "CREATED", "EXPIRES", "REVOKED"
+                    "{:<38} {:<20} {:<24} {:<24} REVOKED",
+                    "ID", "SCOPE", "CREATED", "EXPIRES"
                 );
                 println!("{}", "-".repeat(120));
                 for t in &tokens {

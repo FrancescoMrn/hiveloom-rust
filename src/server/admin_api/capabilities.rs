@@ -6,7 +6,7 @@ use axum::{
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::store::models::Capability;
+use crate::store::models::{Capability, CreateCapabilityParams, UpdateCapabilityParams};
 
 fn err_json(status: StatusCode, msg: &str) -> (StatusCode, Json<serde_json::Value>) {
     (status, Json(serde_json::json!({ "error": msg })))
@@ -54,15 +54,17 @@ pub async fn create_capability(
     let conn = tenant_store.conn();
     match Capability::create(
         conn,
-        tid,
-        aid,
-        &body.name,
-        &body.description,
-        &body.endpoint_url,
-        &body.auth_type,
-        body.credential_ref.as_deref(),
-        body.input_schema.as_deref(),
-        body.output_schema.as_deref(),
+        CreateCapabilityParams {
+            tenant_id: tid,
+            agent_id: aid,
+            name: &body.name,
+            description: &body.description,
+            endpoint_url: &body.endpoint_url,
+            auth_type: &body.auth_type,
+            credential_ref: body.credential_ref.as_deref(),
+            input_schema: body.input_schema.as_deref(),
+            output_schema: body.output_schema.as_deref(),
+        },
     ) {
         Ok(cap) => (StatusCode::CREATED, Json(serde_json::to_value(cap).unwrap())),
         Err(e) => err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
@@ -112,14 +114,16 @@ pub async fn update_capability(
     let conn = tenant_store.conn();
     match Capability::update(
         conn,
-        cid,
-        &body.name,
-        &body.description,
-        &body.endpoint_url,
-        &body.auth_type,
-        body.credential_ref.as_deref(),
-        body.input_schema.as_deref(),
-        body.output_schema.as_deref(),
+        UpdateCapabilityParams {
+            id: cid,
+            name: &body.name,
+            description: &body.description,
+            endpoint_url: &body.endpoint_url,
+            auth_type: &body.auth_type,
+            credential_ref: body.credential_ref.as_deref(),
+            input_schema: body.input_schema.as_deref(),
+            output_schema: body.output_schema.as_deref(),
+        },
     ) {
         Ok(()) => {
             match Capability::get(conn, cid) {

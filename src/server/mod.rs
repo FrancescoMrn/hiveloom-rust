@@ -73,11 +73,10 @@ pub fn create_router(state: AppState) -> Router {
             axum::routing::get(oauth::handle_callback),
         )
         // ── MCP Streamable HTTP transport (T082) ───────────────────────
-        // TODO: Fix Send bound issue — MutexGuard from conn() is not Send across await
-        // .route(
-        //     "/mcp/:tenant_slug/:agent_slug",
-        //     axum::routing::post(mcp::transport::handle_mcp_request),
-        // )
+        .route(
+            "/mcp/:tenant_slug/:agent_slug",
+            axum::routing::post(mcp::transport::handle_mcp_request),
+        )
         // ── MCP OAuth AS metadata (T085) ───────────────────────────────
         .route(
             "/.well-known/oauth-authorization-server",

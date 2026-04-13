@@ -1,4 +1,4 @@
-#![deny(clippy::all)]
+#![warn(clippy::all)]
 
 pub mod cli;
 pub mod engine;

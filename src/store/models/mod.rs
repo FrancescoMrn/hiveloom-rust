@@ -17,7 +17,7 @@ pub mod scheduled_job;
 pub mod tenant;
 
 pub use agent::Agent;
-pub use capability::Capability;
+pub use capability::{Capability, CreateCapabilityParams, UpdateCapabilityParams};
 pub use capability_invocation_log::CapabilityInvocationLog;
 pub use chat_surface_binding::ChatSurfaceBinding;
 pub use conversation::{Conversation, ConversationTurn};

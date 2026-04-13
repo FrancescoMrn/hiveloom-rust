@@ -39,32 +39,46 @@ fn row_to_capability(row: &rusqlite::Row) -> rusqlite::Result<Capability> {
     })
 }
 
+/// Parameters for creating a new capability (avoids too-many-arguments lint).
+pub struct CreateCapabilityParams<'a> {
+    pub tenant_id: Uuid,
+    pub agent_id: Uuid,
+    pub name: &'a str,
+    pub description: &'a str,
+    pub endpoint_url: &'a str,
+    pub auth_type: &'a str,
+    pub credential_ref: Option<&'a str>,
+    pub input_schema: Option<&'a str>,
+    pub output_schema: Option<&'a str>,
+}
+
+/// Parameters for updating an existing capability.
+pub struct UpdateCapabilityParams<'a> {
+    pub id: Uuid,
+    pub name: &'a str,
+    pub description: &'a str,
+    pub endpoint_url: &'a str,
+    pub auth_type: &'a str,
+    pub credential_ref: Option<&'a str>,
+    pub input_schema: Option<&'a str>,
+    pub output_schema: Option<&'a str>,
+}
+
 impl Capability {
-    pub fn create(
-        conn: &Connection,
-        tenant_id: Uuid,
-        agent_id: Uuid,
-        name: &str,
-        description: &str,
-        endpoint_url: &str,
-        auth_type: &str,
-        credential_ref: Option<&str>,
-        input_schema: Option<&str>,
-        output_schema: Option<&str>,
-    ) -> Result<Capability> {
+    pub fn create(conn: &Connection, p: CreateCapabilityParams<'_>) -> Result<Capability> {
         let id = Uuid::new_v4();
         let now = chrono::Utc::now().to_rfc3339();
         let cap = Capability {
             id,
-            tenant_id,
-            agent_id,
-            name: name.to_string(),
-            description: description.to_string(),
-            endpoint_url: endpoint_url.to_string(),
-            auth_type: auth_type.to_string(),
-            credential_ref: credential_ref.map(|s| s.to_string()),
-            input_schema: input_schema.map(|s| s.to_string()),
-            output_schema: output_schema.map(|s| s.to_string()),
+            tenant_id: p.tenant_id,
+            agent_id: p.agent_id,
+            name: p.name.to_string(),
+            description: p.description.to_string(),
+            endpoint_url: p.endpoint_url.to_string(),
+            auth_type: p.auth_type.to_string(),
+            credential_ref: p.credential_ref.map(|s| s.to_string()),
+            input_schema: p.input_schema.map(|s| s.to_string()),
+            output_schema: p.output_schema.map(|s| s.to_string()),
             created_at: now.clone(),
             updated_at: now,
         };
@@ -117,32 +131,22 @@ impl Capability {
         Ok(caps)
     }
 
-    pub fn update(
-        conn: &Connection,
-        id: Uuid,
-        name: &str,
-        description: &str,
-        endpoint_url: &str,
-        auth_type: &str,
-        credential_ref: Option<&str>,
-        input_schema: Option<&str>,
-        output_schema: Option<&str>,
-    ) -> Result<()> {
+    pub fn update(conn: &Connection, p: UpdateCapabilityParams<'_>) -> Result<()> {
         let now = chrono::Utc::now().to_rfc3339();
         conn.execute(
             "UPDATE capabilities SET name = ?1, description = ?2, endpoint_url = ?3,
              auth_type = ?4, credential_ref = ?5, input_schema = ?6, output_schema = ?7,
              updated_at = ?8 WHERE id = ?9",
             params![
-                name,
-                description,
-                endpoint_url,
-                auth_type,
-                credential_ref,
-                input_schema,
-                output_schema,
+                p.name,
+                p.description,
+                p.endpoint_url,
+                p.auth_type,
+                p.credential_ref,
+                p.input_schema,
+                p.output_schema,
                 now,
-                id.to_string(),
+                p.id.to_string(),
             ],
         )?;
         Ok(())

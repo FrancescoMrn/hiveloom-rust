@@ -186,7 +186,7 @@ fn read_secret(prompt: &str) -> anyhow::Result<String> {
         if !was_raw {
             let _ = crossterm::terminal::disable_raw_mode();
         }
-        return Ok(buf);
+        Ok(buf)
     }
 
     #[cfg(not(unix))]

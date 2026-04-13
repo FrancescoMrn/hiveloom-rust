@@ -73,8 +73,8 @@ struct LogEntry {
 
 fn print_log_table(logs: &[LogEntry]) {
     println!(
-        "{:<38} {:<38} {:<8} {:>8} {:<24} {}",
-        "ID", "CAPABILITY", "OK", "MS", "TIME", "ERROR"
+        "{:<38} {:<38} {:<8} {:>8} {:<24} ERROR",
+        "ID", "CAPABILITY", "OK", "MS", "TIME"
     );
     println!("{}", "-".repeat(120));
     for log in logs {
