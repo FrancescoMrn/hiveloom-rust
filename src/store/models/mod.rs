@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod capability;
+pub mod capability_invocation_log;
 pub mod chat_surface_binding;
 pub mod conversation;
 pub mod credential;
@@ -10,6 +11,7 @@ pub mod tenant;
 
 pub use agent::Agent;
 pub use capability::Capability;
+pub use capability_invocation_log::CapabilityInvocationLog;
 pub use chat_surface_binding::ChatSurfaceBinding;
 pub use conversation::{Conversation, ConversationTurn};
 pub use credential::CredentialVaultEntry;

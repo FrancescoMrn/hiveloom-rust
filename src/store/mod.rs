@@ -6,3 +6,4 @@ pub mod vault;
 
 pub use platform::PlatformStore;
 pub use tenant::TenantStore;
+pub use vault::Vault;

@@ -109,6 +109,21 @@ impl Tenant {
         Ok(tenants)
     }
 
+    pub fn update(
+        conn: &Connection,
+        id: Uuid,
+        name: &str,
+        slug: &str,
+        timezone: &str,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE tenants SET name = ?1, slug = ?2, timezone = ?3, updated_at = ?4 WHERE id = ?5",
+            params![name, slug, timezone, now, id.to_string()],
+        )?;
+        Ok(())
+    }
+
     pub fn update_status(conn: &Connection, id: Uuid, status: &str) -> Result<()> {
         let now = chrono::Utc::now().to_rfc3339();
         conn.execute(

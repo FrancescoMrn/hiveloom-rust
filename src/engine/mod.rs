@@ -9,6 +9,6 @@ pub mod reflection;
 pub mod scheduler;
 pub mod workflow;
 
-pub use agent_loop::{AgentInvocation, InvocationResult};
+pub use agent_loop::{AgentInvocation, InvocationResult, run_agent_loop_with_vault};
 pub use chat_surface::{ChatSurface, SurfaceType};
 pub use dedup::DedupTable;

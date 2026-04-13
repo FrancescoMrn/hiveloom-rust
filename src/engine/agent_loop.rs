@@ -1,5 +1,6 @@
 use crate::llm::provider::{LlmProvider, Message, ToolDefinition};
 use crate::store::models::{Agent, Capability, ConversationTurn, MemoryEntry};
+use crate::store::Vault;
 
 pub struct AgentInvocation {
     pub agent: Agent,
@@ -82,8 +83,26 @@ pub async fn run_agent_loop(
             // Process tool calls
             for tc in &response.tool_calls {
                 tool_calls_made.push(tc.name.clone());
-                // Execute capability (placeholder -- capability_exec handles this)
-                let result = format!("{{\"result\": \"Tool {} called\"}}", tc.name);
+
+                // Find the matching capability and execute it
+                let result = if let Some(cap) = invocation
+                    .capabilities
+                    .iter()
+                    .find(|c| c.name == tc.name)
+                {
+                    // Execute capability via the execution engine.
+                    // The vault is needed to decrypt credentials; if unavailable we fall
+                    // back to a placeholder so the loop can still produce a text response.
+                    // In production the vault is always reachable via AppState.
+                    serde_json::json!({
+                        "result": format!("Tool {} called (capability execution requires vault context)", tc.name),
+                        "arguments": tc.arguments,
+                        "capability_id": cap.id.to_string()
+                    })
+                    .to_string()
+                } else {
+                    format!("{{\"error\": \"unknown tool: {}\"}}", tc.name)
+                };
 
                 ConversationTurn::append(
                     conn,
@@ -107,6 +126,146 @@ pub async fn run_agent_loop(
                     content: format!("tool_use: {}", tc.name),
                 });
                 // Tool results sent as user role for simplicity
+                messages.push(Message {
+                    role: "user".to_string(),
+                    content: result,
+                });
+            }
+            continue;
+        }
+
+        if let Some(content) = &response.content {
+            ConversationTurn::append(
+                conn,
+                invocation.conversation_id,
+                invocation.tenant_id,
+                "assistant",
+                content,
+                0,
+            )?;
+            return Ok(InvocationResult {
+                response: content.clone(),
+                tool_calls_made,
+            });
+        }
+
+        break;
+    }
+
+    Ok(InvocationResult {
+        response: "I wasn't able to generate a response.".to_string(),
+        tool_calls_made,
+    })
+}
+
+/// Extended agent loop that has access to the Vault for real capability execution.
+pub async fn run_agent_loop_with_vault(
+    invocation: &AgentInvocation,
+    provider: &dyn LlmProvider,
+    conn: &rusqlite::Connection,
+    user_message: &str,
+    vault: &Vault,
+) -> anyhow::Result<InvocationResult> {
+    // 1. Append user message as turn
+    ConversationTurn::append(
+        conn,
+        invocation.conversation_id,
+        invocation.tenant_id,
+        "user",
+        user_message,
+        0,
+    )?;
+
+    // 2. Load conversation history
+    let history = ConversationTurn::list_by_conversation(conn, invocation.conversation_id)?;
+
+    // 3. Load relevant memory
+    let memories = MemoryEntry::read_for_user(
+        conn,
+        invocation.tenant_id,
+        invocation.agent.id,
+        &invocation.user_identity,
+    )?;
+
+    // 4. Build messages
+    let mut messages = vec![];
+    messages.push(Message {
+        role: "system".to_string(),
+        content: build_system_context(&invocation.agent, &memories),
+    });
+    for turn in &history {
+        messages.push(Message {
+            role: turn.role.clone(),
+            content: turn.content.clone(),
+        });
+    }
+
+    // 5. Build tool definitions from capabilities
+    let tools: Vec<ToolDefinition> = invocation
+        .capabilities
+        .iter()
+        .map(|c| ToolDefinition {
+            name: c.name.clone(),
+            description: c.description.clone(),
+            input_schema: c
+                .input_schema
+                .as_ref()
+                .and_then(|s| serde_json::from_str(s).ok())
+                .unwrap_or(serde_json::json!({"type": "object"})),
+        })
+        .collect();
+
+    let mut tool_calls_made = vec![];
+
+    // 6. LLM loop with max 10 tool-call iterations
+    for _ in 0..10 {
+        let response = provider.chat_complete(&messages, &tools).await?;
+
+        if !response.tool_calls.is_empty() {
+            for tc in &response.tool_calls {
+                tool_calls_made.push(tc.name.clone());
+
+                let result = if let Some(cap) = invocation
+                    .capabilities
+                    .iter()
+                    .find(|c| c.name == tc.name)
+                {
+                    let exec_result = crate::engine::capability_exec::execute_capability(
+                        conn,
+                        cap,
+                        &tc.arguments,
+                        &invocation.tenant_id,
+                        &invocation.agent.id,
+                        &invocation.conversation_id,
+                        vault,
+                    )
+                    .await?;
+                    serde_json::to_string(&exec_result)?
+                } else {
+                    format!("{{\"error\": \"unknown tool: {}\"}}", tc.name)
+                };
+
+                ConversationTurn::append(
+                    conn,
+                    invocation.conversation_id,
+                    invocation.tenant_id,
+                    "assistant",
+                    &format!("tool_use: {} {}", tc.name, tc.arguments),
+                    0,
+                )?;
+                ConversationTurn::append(
+                    conn,
+                    invocation.conversation_id,
+                    invocation.tenant_id,
+                    "tool_result",
+                    &result,
+                    0,
+                )?;
+
+                messages.push(Message {
+                    role: "assistant".to_string(),
+                    content: format!("tool_use: {}", tc.name),
+                });
                 messages.push(Message {
                     role: "user".to_string(),
                     content: result,

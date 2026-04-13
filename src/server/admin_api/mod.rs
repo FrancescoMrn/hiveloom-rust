@@ -4,8 +4,14 @@ use axum::{
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
+    routing::{delete, get, post, put},
 };
 use std::sync::Arc;
+
+pub mod agents;
+pub mod capabilities;
+pub mod credentials;
+pub mod tenants;
 
 /// Auth context stored in request extensions after the auth middleware runs.
 #[derive(Clone, Debug)]
@@ -17,8 +23,72 @@ pub struct AuthContext {
 
 pub fn router(state: Arc<super::AppState>) -> Router<Arc<super::AppState>> {
     Router::new()
-        // Tenant routes, agent routes, etc. will be added per story
-        // For now, just the skeleton with auth middleware
+        // ── Tenant routes (T044) ────────────────────────────────────────
+        .route("/tenants", post(tenants::create_tenant))
+        .route("/tenants", get(tenants::list_tenants))
+        .route("/tenants/{tid}", get(tenants::get_tenant))
+        .route("/tenants/{tid}", put(tenants::update_tenant))
+        .route("/tenants/{tid}", delete(tenants::delete_tenant))
+        // ── Agent routes (T041) ─────────────────────────────────────────
+        .route("/tenants/{tid}/agents", post(agents::create_agent))
+        .route("/tenants/{tid}/agents", get(agents::list_agents))
+        .route("/tenants/{tid}/agents/{aid}", get(agents::get_agent))
+        .route("/tenants/{tid}/agents/{aid}", put(agents::update_agent))
+        .route("/tenants/{tid}/agents/{aid}", delete(agents::delete_agent))
+        .route(
+            "/tenants/{tid}/agents/{aid}/versions",
+            get(agents::list_versions),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/rollback",
+            post(agents::rollback_agent),
+        )
+        // ── Capability routes (T042) ────────────────────────────────────
+        .route(
+            "/tenants/{tid}/agents/{aid}/capabilities",
+            post(capabilities::create_capability),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/capabilities",
+            get(capabilities::list_capabilities),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/capabilities/{cid}",
+            get(capabilities::get_capability),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/capabilities/{cid}",
+            put(capabilities::update_capability),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/capabilities/{cid}",
+            delete(capabilities::delete_capability),
+        )
+        // ── Credential routes (T043) ────────────────────────────────────
+        .route("/tenants/{tid}/credentials", post(credentials::set_credential))
+        .route("/tenants/{tid}/credentials", get(credentials::list_credentials))
+        .route(
+            "/tenants/{tid}/credentials/{name}",
+            delete(credentials::delete_credential),
+        )
+        .route(
+            "/tenants/{tid}/credentials/{name}/rotate",
+            post(credentials::rotate_credential),
+        )
+        // ── ChatSurfaceBinding routes (T045) ────────────────────────────
+        .route(
+            "/tenants/{tid}/agents/{aid}/bindings",
+            post(agents::create_binding),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/bindings",
+            get(agents::list_bindings),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/bindings/{bid}",
+            delete(agents::delete_binding),
+        )
+        // ── Auth middleware ─────────────────────────────────────────────
         .layer(middleware::from_fn(
             move |request: Request, next: Next| {
                 let state = state.clone();

@@ -3,6 +3,7 @@ pub mod apply;
 pub mod auth;
 pub mod backup;
 pub mod capability;
+pub mod client;
 pub mod credential;
 pub mod health;
 pub mod interactive;

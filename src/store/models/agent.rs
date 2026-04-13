@@ -216,4 +216,17 @@ impl Agent {
             .context("target version not found")?;
         Self::create_new_version(conn, &old)
     }
+
+    pub fn delete(conn: &Connection, id: Uuid) -> Result<()> {
+        conn.execute(
+            "UPDATE agents SET status = 'disabled', is_current = 0 WHERE id = ?1 AND is_current = 1",
+            params![id.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn update(conn: &Connection, agent: &Agent) -> Result<Agent> {
+        // Create a new version with updated fields
+        Self::create_new_version(conn, agent)
+    }
 }
