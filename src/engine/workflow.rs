@@ -1,3 +1,4 @@
+use crate::compaction::engine::compact_on_resume;
 use crate::store::models::Conversation;
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +31,35 @@ pub fn pause_workflow(
     let json = serde_json::to_string(&state)?;
     Conversation::set_workflow_state(conn, *conversation_id, &json)?;
     Ok(())
+}
+
+/// T029: Resume a workflow with compaction check. When a paused conversation
+/// is rehydrated and its context exceeds the threshold, trigger compaction
+/// before the next LLM call.
+pub async fn resume_workflow_with_compaction(
+    conn: &rusqlite::Connection,
+    conversation_id: &uuid::Uuid,
+    provider: &dyn crate::llm::provider::LlmProvider,
+    tenant_id: uuid::Uuid,
+    agent_id: uuid::Uuid,
+    system_prompt: &str,
+    model_id: &str,
+) -> anyhow::Result<Option<WorkflowState>> {
+    let state = resume_workflow(conn, conversation_id)?;
+    if state.is_some() {
+        // Check if compaction is needed after rehydration
+        let _outcome = compact_on_resume(
+            conn,
+            provider,
+            tenant_id,
+            agent_id,
+            *conversation_id,
+            system_prompt,
+            model_id,
+        )
+        .await?;
+    }
+    Ok(state)
 }
 
 /// Resume a workflow: load state, clear waiting_for

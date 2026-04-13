@@ -81,6 +81,26 @@ pub enum AgentCommand {
         #[arg(long)]
         channel: String,
     },
+    /// View or update compaction configuration for an agent (T025)
+    Compaction {
+        /// Agent ID or name
+        id: String,
+        /// Compaction trigger threshold percentage (50-100)
+        #[arg(long)]
+        threshold: Option<i64>,
+        /// Maximum summary fraction percentage (10-50)
+        #[arg(long)]
+        max_summary: Option<i64>,
+        /// Number of recent turns to protect (1-20)
+        #[arg(long)]
+        protected_turns: Option<i64>,
+        /// Show compaction indicator to end users
+        #[arg(long)]
+        show_indicator: Option<bool>,
+        /// Reset to platform defaults (remove agent override)
+        #[arg(long)]
+        reset: bool,
+    },
 }
 
 // ── API response types (mirrors server JSON) ────────────────────────
@@ -105,6 +125,12 @@ pub struct AgentResponse {
     pub is_current: bool,
     #[serde(default)]
     pub created_at: String,
+    /// T036: Compaction count for this agent
+    #[serde(default)]
+    pub compaction_count: u64,
+    /// T036: Last compaction timestamp
+    #[serde(default)]
+    pub last_compaction_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -339,9 +365,71 @@ pub async fn run(args: AgentArgs) -> anyhow::Result<()> {
                 );
             }
         }
+        AgentCommand::Compaction {
+            id,
+            threshold,
+            max_summary,
+            protected_turns,
+            show_indicator,
+            reset,
+        } => {
+            let is_set_mode = threshold.is_some()
+                || max_summary.is_some()
+                || protected_turns.is_some()
+                || show_indicator.is_some()
+                || reset;
+
+            if is_set_mode {
+                // PATCH mode
+                let body = serde_json::json!({
+                    "threshold_pct": threshold,
+                    "max_summary_fraction_pct": max_summary,
+                    "protected_turn_count": protected_turns,
+                    "show_indicator": show_indicator,
+                    "reset": reset,
+                });
+                let result: serde_json::Value = client
+                    .patch(&format!("/api/tenants/{tid}/agents/{id}/compaction-config"), &body)
+                    .await?;
+                if json_out {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                } else {
+                    println!("Updated compaction config for agent \"{}\":", id);
+                    print_compaction_config(&result);
+                }
+            } else {
+                // GET mode
+                let result: serde_json::Value = client
+                    .get(&format!("/api/tenants/{tid}/agents/{id}/compaction-config"))
+                    .await?;
+                if json_out {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                } else {
+                    println!("Compaction config for agent \"{}\":", id);
+                    print_compaction_config(&result);
+                }
+            }
+        }
     }
 
     Ok(())
+}
+
+fn print_compaction_config(config: &serde_json::Value) {
+    let source = config
+        .get("source")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let threshold = config.get("threshold_pct").and_then(|v| v.as_i64()).unwrap_or(80);
+    let max_summary = config.get("max_summary_fraction_pct").and_then(|v| v.as_i64()).unwrap_or(30);
+    let protected = config.get("protected_turn_count").and_then(|v| v.as_i64()).unwrap_or(4);
+    let indicator = config.get("show_indicator").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    println!("  Threshold:        {}% ({})", threshold, source);
+    println!("  Max summary:      {}% ({})", max_summary, source);
+    println!("  Protected turns:  {} ({})", protected, source);
+    println!("  Show indicator:   {} ({})", indicator, source);
+    println!("  Source:           {}", source);
 }
 
 fn print_agent_detail(a: &AgentResponse) {
@@ -358,4 +446,8 @@ fn print_agent_detail(a: &AgentResponse) {
     for line in a.system_prompt.lines() {
         println!("  {line}");
     }
+    // T036: Compaction info
+    println!("Compaction:");
+    println!("  Count:          {}", a.compaction_count);
+    println!("  Last compacted: {}", a.last_compaction_at.as_deref().unwrap_or("never"));
 }

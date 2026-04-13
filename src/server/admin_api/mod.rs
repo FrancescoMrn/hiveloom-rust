@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{delete, get, post, put},
+    routing::{delete, get, patch, post, put},
 };
 use std::sync::Arc;
 
@@ -12,6 +12,7 @@ pub mod agents;
 pub mod auth_tokens;
 pub mod backups;
 pub mod capabilities;
+pub mod compaction;
 pub mod credentials;
 pub mod event_subscriptions;
 pub mod mcp_identities;
@@ -211,6 +212,19 @@ pub fn router(state: Arc<super::AppState>) -> Router<Arc<super::AppState>> {
         .route(
             "/tenants/{tid}/agents/{aid}/users/{uid}/offboard",
             post(reflections::offboard_user),
+        )
+        // ── Compaction routes (T022, T023) ────────────────────────────
+        .route(
+            "/tenants/{tid}/compaction-events",
+            get(compaction::list_compaction_events),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/compaction-config",
+            get(compaction::get_compaction_config),
+        )
+        .route(
+            "/tenants/{tid}/agents/{aid}/compaction-config",
+            patch(compaction::patch_compaction_config),
         )
         // ── Auth middleware ─────────────────────────────────────────────
         .layer(middleware::from_fn(

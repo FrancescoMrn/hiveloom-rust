@@ -6,6 +6,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use crate::compaction::engine::cleanup_expired_archives;
+use crate::compaction::event::CompactionEvent;
 use crate::store::models::{Agent, Capability, Conversation, ScheduledJob};
 use crate::store::TenantStore;
 
@@ -165,6 +167,10 @@ impl JobScheduler {
                         }
                     }
                 }
+
+                // T033, T034: Periodically run compaction retention cleanup
+                // (runs alongside scheduled job checks — lightweight DELETE queries)
+                run_compaction_retention(conn);
             }
 
             // Sleep until next job is due, or a default poll interval
@@ -199,6 +205,32 @@ pub fn compute_next_fire(
         .next()
         .ok_or_else(|| anyhow::anyhow!("No next fire time for cron expression"))?;
     Ok(next.with_timezone(&Utc))
+}
+
+/// T033, T034: Clean up expired compaction artifacts (30-day retention).
+fn run_compaction_retention(conn: &rusqlite::Connection) {
+    // T033: Delete expired raw turn archive entries
+    match cleanup_expired_archives(conn) {
+        Ok(count) if count > 0 => {
+            tracing::debug!(deleted = count, "Cleaned up expired raw turn archive entries");
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to clean up raw turn archive");
+        }
+        _ => {}
+    }
+
+    // T034: Delete expired compaction events (30-day retention)
+    let cutoff = (chrono::Utc::now() - chrono::Duration::days(30)).to_rfc3339();
+    match CompactionEvent::cleanup_expired(conn, &cutoff) {
+        Ok(count) if count > 0 => {
+            tracing::debug!(deleted = count, "Cleaned up expired compaction events");
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "Failed to clean up compaction events");
+        }
+        _ => {}
+    }
 }
 
 /// T061: Fire a single scheduled job: open tenant store, load agent, create

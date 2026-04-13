@@ -41,6 +41,15 @@ struct AgentSummary {
     status: String,
     #[serde(default)]
     id: String,
+    /// Total compaction events for this agent (T026).
+    #[serde(default)]
+    compaction_count: u64,
+    /// Relative time since last compaction (T026).
+    #[serde(default)]
+    last_compacted: Option<String>,
+    /// Whether fallback truncation was used recently (T038).
+    #[serde(default)]
+    compaction_fallback_warning: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -150,8 +159,8 @@ fn render_dashboard(f: &mut ratatui::Frame, data: &DashboardData) {
     .block(Block::default().borders(Borders::ALL).title("Hiveloom Dashboard"));
     f.render_widget(title, chunks[0]);
 
-    // Agents table
-    let header = Row::new(vec!["NAME", "STATUS", "ID"])
+    // Agents table (T026: compaction counters, T038: fallback warning)
+    let header = Row::new(vec!["NAME", "STATUS", "COMPACTIONS", "LAST COMPACTED", "ID"])
         .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
     let rows: Vec<Row> = data
         .agents
@@ -162,9 +171,22 @@ fn render_dashboard(f: &mut ratatui::Frame, data: &DashboardData) {
                 "disabled" => Style::default().fg(Color::Red),
                 _ => Style::default(),
             };
+            let compaction_str = if a.compaction_fallback_warning {
+                format!("{} !", a.compaction_count)
+            } else {
+                format!("{}", a.compaction_count)
+            };
+            let compaction_style = if a.compaction_fallback_warning {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default()
+            };
+            let last_compacted = a.last_compacted.clone().unwrap_or_else(|| "never".to_string());
             Row::new(vec![
                 Cell::from(a.name.clone()),
                 Cell::from(a.status.clone()).style(status_style),
+                Cell::from(compaction_str).style(compaction_style),
+                Cell::from(last_compacted),
                 Cell::from(a.id.clone()),
             ])
         })
@@ -172,9 +194,11 @@ fn render_dashboard(f: &mut ratatui::Frame, data: &DashboardData) {
     let agents_table = Table::new(
         rows,
         [
-            Constraint::Percentage(30),
-            Constraint::Percentage(20),
-            Constraint::Percentage(50),
+            Constraint::Percentage(22),
+            Constraint::Percentage(12),
+            Constraint::Percentage(14),
+            Constraint::Percentage(16),
+            Constraint::Percentage(36),
         ],
     )
     .header(header)

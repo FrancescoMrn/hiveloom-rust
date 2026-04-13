@@ -1,3 +1,5 @@
+use crate::compaction::engine::{CompactionEngine, CompactionOutcome};
+use crate::compaction::indicator::CompactionIndicator;
 use crate::llm::provider::{LlmProvider, Message, ToolDefinition};
 use crate::store::models::{Agent, Capability, ConversationTurn, MemoryEntry};
 use crate::store::Vault;
@@ -32,10 +34,7 @@ pub async fn run_agent_loop(
         0,
     )?;
 
-    // 2. Load conversation history
-    let history = ConversationTurn::list_by_conversation(conn, invocation.conversation_id)?;
-
-    // 3. Load relevant memory
+    // 2. Load relevant memory
     let memories = MemoryEntry::read_for_user(
         conn,
         invocation.tenant_id,
@@ -43,13 +42,43 @@ pub async fn run_agent_loop(
         &invocation.user_identity,
     )?;
 
-    // 4. Build messages: system prompt + memory context + conversation history
+    // 3. T019: Pre-LLM-call compaction check
+    let system_context = build_system_context(&invocation.agent, &memories);
+    let compaction_outcome = CompactionEngine::check_and_compact(
+        conn,
+        provider,
+        invocation.tenant_id,
+        invocation.agent.id,
+        invocation.conversation_id,
+        &system_context,
+        &invocation.agent.model_id,
+    )
+    .await
+    .unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "Compaction check failed, proceeding without compaction");
+        CompactionOutcome::NotNeeded
+    });
+
+    // 4. Load conversation history (after potential compaction)
+    let history = ConversationTurn::list_by_conversation(conn, invocation.conversation_id)?;
+
+    // 5. Build messages: system prompt + compacted summary + conversation history
     let mut messages = vec![];
-    // System prompt with memory context
     messages.push(Message {
         role: "system".to_string(),
-        content: build_system_context(&invocation.agent, &memories),
+        content: system_context.clone(),
     });
+
+    // Include compacted summary if available
+    if let CompactionOutcome::Compacted { ref summary, .. } = compaction_outcome {
+        if let Some(ref s) = summary {
+            messages.push(Message {
+                role: "system".to_string(),
+                content: format!("[Previous context summary]\n{}", s),
+            });
+        }
+    }
+
     // History (includes the user message we just appended)
     for turn in &history {
         messages.push(Message {
@@ -58,7 +87,7 @@ pub async fn run_agent_loop(
         });
     }
 
-    // 5. Build tool definitions from capabilities
+    // 6. Build tool definitions from capabilities
     let tools: Vec<ToolDefinition> = invocation
         .capabilities
         .iter()
@@ -75,7 +104,7 @@ pub async fn run_agent_loop(
 
     let mut tool_calls_made = vec![];
 
-    // 6. LLM loop with max 10 tool-call iterations to prevent infinite loops
+    // 7. LLM loop with max 10 tool-call iterations to prevent infinite loops
     for _ in 0..10 {
         let response = provider.chat_complete(&messages, &tools).await?;
 
@@ -90,10 +119,6 @@ pub async fn run_agent_loop(
                     .iter()
                     .find(|c| c.name == tc.name)
                 {
-                    // Execute capability via the execution engine.
-                    // The vault is needed to decrypt credentials; if unavailable we fall
-                    // back to a placeholder so the loop can still produce a text response.
-                    // In production the vault is always reachable via AppState.
                     serde_json::json!({
                         "result": format!("Tool {} called (capability execution requires vault context)", tc.name),
                         "arguments": tc.arguments,
@@ -125,7 +150,6 @@ pub async fn run_agent_loop(
                     role: "assistant".to_string(),
                     content: format!("tool_use: {}", tc.name),
                 });
-                // Tool results sent as user role for simplicity
                 messages.push(Message {
                     role: "user".to_string(),
                     content: result,
@@ -135,16 +159,18 @@ pub async fn run_agent_loop(
         }
 
         if let Some(content) = &response.content {
+            // T032: Inject compaction indicator if applicable
+            let final_response = CompactionIndicator::inject_indicator(content, &compaction_outcome);
             ConversationTurn::append(
                 conn,
                 invocation.conversation_id,
                 invocation.tenant_id,
                 "assistant",
-                content,
+                &final_response,
                 0,
             )?;
             return Ok(InvocationResult {
-                response: content.clone(),
+                response: final_response,
                 tool_calls_made,
             });
         }
@@ -176,10 +202,7 @@ pub async fn run_agent_loop_with_vault(
         0,
     )?;
 
-    // 2. Load conversation history
-    let history = ConversationTurn::list_by_conversation(conn, invocation.conversation_id)?;
-
-    // 3. Load relevant memory
+    // 2. Load relevant memory
     let memories = MemoryEntry::read_for_user(
         conn,
         invocation.tenant_id,
@@ -187,12 +210,43 @@ pub async fn run_agent_loop_with_vault(
         &invocation.user_identity,
     )?;
 
-    // 4. Build messages
+    // 3. T019: Pre-LLM-call compaction check (vault-enabled loop)
+    let system_context = build_system_context(&invocation.agent, &memories);
+    let compaction_outcome = CompactionEngine::check_and_compact(
+        conn,
+        provider,
+        invocation.tenant_id,
+        invocation.agent.id,
+        invocation.conversation_id,
+        &system_context,
+        &invocation.agent.model_id,
+    )
+    .await
+    .unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "Compaction check failed, proceeding without compaction");
+        CompactionOutcome::NotNeeded
+    });
+
+    // 4. Load conversation history (after potential compaction)
+    let history = ConversationTurn::list_by_conversation(conn, invocation.conversation_id)?;
+
+    // 5. Build messages
     let mut messages = vec![];
     messages.push(Message {
         role: "system".to_string(),
-        content: build_system_context(&invocation.agent, &memories),
+        content: system_context.clone(),
     });
+
+    // Include compacted summary if available
+    if let CompactionOutcome::Compacted { ref summary, .. } = compaction_outcome {
+        if let Some(ref s) = summary {
+            messages.push(Message {
+                role: "system".to_string(),
+                content: format!("[Previous context summary]\n{}", s),
+            });
+        }
+    }
+
     for turn in &history {
         messages.push(Message {
             role: turn.role.clone(),
@@ -200,7 +254,7 @@ pub async fn run_agent_loop_with_vault(
         });
     }
 
-    // 5. Build tool definitions from capabilities
+    // 6. Build tool definitions from capabilities
     let tools: Vec<ToolDefinition> = invocation
         .capabilities
         .iter()
@@ -217,7 +271,7 @@ pub async fn run_agent_loop_with_vault(
 
     let mut tool_calls_made = vec![];
 
-    // 6. LLM loop with max 10 tool-call iterations
+    // 7. LLM loop with max 10 tool-call iterations
     for _ in 0..10 {
         let response = provider.chat_complete(&messages, &tools).await?;
 
@@ -275,16 +329,18 @@ pub async fn run_agent_loop_with_vault(
         }
 
         if let Some(content) = &response.content {
+            // T032: Inject compaction indicator if applicable
+            let final_response = CompactionIndicator::inject_indicator(content, &compaction_outcome);
             ConversationTurn::append(
                 conn,
                 invocation.conversation_id,
                 invocation.tenant_id,
                 "assistant",
-                content,
+                &final_response,
                 0,
             )?;
             return Ok(InvocationResult {
-                response: content.clone(),
+                response: final_response,
                 tool_calls_made,
             });
         }

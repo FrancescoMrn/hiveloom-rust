@@ -79,6 +79,21 @@ impl ApiClient {
         Ok(resp.status())
     }
 
+    pub async fn patch<B: serde::Serialize, T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T> {
+        let req = self.apply_auth(self.client.patch(self.url(path))).json(body);
+        let resp = req.send().await.context("API request failed")?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            anyhow::bail!("API error ({}): {}", status, body);
+        }
+        resp.json::<T>().await.context("failed to parse response")
+    }
+
     pub async fn delete(&self, path: &str) -> Result<()> {
         let req = self.apply_auth(self.client.delete(self.url(path)));
         let resp = req.send().await.context("API request failed")?;

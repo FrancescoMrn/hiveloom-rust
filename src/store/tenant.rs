@@ -241,6 +241,59 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
             created_at TEXT NOT NULL
         );
     "#),
+    // ── Spec 002: Context Compaction (T008) ─────────────────────────────
+    ("0017_create_compaction_config", r#"
+        CREATE TABLE IF NOT EXISTS compaction_config (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            agent_id TEXT,
+            threshold_pct INTEGER NOT NULL DEFAULT 80 CHECK(threshold_pct >= 50 AND threshold_pct <= 100),
+            max_summary_fraction_pct INTEGER NOT NULL DEFAULT 30 CHECK(max_summary_fraction_pct >= 10 AND max_summary_fraction_pct <= 50),
+            protected_turn_count INTEGER NOT NULL DEFAULT 4 CHECK(protected_turn_count >= 1 AND protected_turn_count <= 20),
+            show_indicator INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(tenant_id, agent_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_compaction_config_lookup ON compaction_config(tenant_id, agent_id);
+    "#),
+    ("0018_create_compaction_events", r#"
+        CREATE TABLE IF NOT EXISTS compaction_events (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            conversation_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            tokens_before INTEGER NOT NULL,
+            tokens_after INTEGER NOT NULL,
+            strategy TEXT NOT NULL CHECK(strategy IN ('summarization','truncation')),
+            fallback_used INTEGER NOT NULL DEFAULT 0,
+            summary_token_count INTEGER,
+            error_message TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_compaction_events_lookup ON compaction_events(tenant_id, agent_id, timestamp);
+    "#),
+    ("0019_create_raw_turn_archive", r#"
+        CREATE TABLE IF NOT EXISTS raw_turn_archive (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            conversation_id TEXT NOT NULL,
+            turn_index INTEGER NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('user','assistant','tool_result','system')),
+            content TEXT NOT NULL,
+            token_count INTEGER NOT NULL DEFAULT 0,
+            compacted_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_raw_turn_archive_lookup ON raw_turn_archive(tenant_id, conversation_id, turn_index);
+        CREATE INDEX IF NOT EXISTS idx_raw_turn_archive_expiry ON raw_turn_archive(expires_at);
+    "#),
+    ("0020_add_compaction_fields_to_conversations", r#"
+        ALTER TABLE conversations ADD COLUMN compacted_summary TEXT;
+        ALTER TABLE conversations ADD COLUMN compaction_count INTEGER DEFAULT 0;
+        ALTER TABLE conversations ADD COLUMN last_compaction_at TEXT;
+        ALTER TABLE conversations ADD COLUMN raw_turns_archived INTEGER DEFAULT 0;
+    "#),
 ];
 
 pub struct TenantStore {

@@ -4,6 +4,7 @@ pub mod auth;
 pub mod backup;
 pub mod capability;
 pub mod client;
+pub mod compaction_log;
 pub mod credential;
 pub mod event;
 pub mod health;
@@ -67,6 +68,8 @@ pub enum Command {
     Version,
     /// Manage backups
     Backup(backup::BackupArgs),
+    /// View compaction event log
+    CompactionLog(compaction_log::CompactionLogArgs),
     /// Interactive mode / first-run wizard
     Interactive,
 }
@@ -96,6 +99,7 @@ pub async fn dispatch(cli: Cli) -> anyhow::Result<()> {
             Ok(())
         }
         Command::Backup(args) => backup::run(args).await,
+        Command::CompactionLog(args) => compaction_log::run(args).await,
         Command::Interactive => interactive::run().await,
     }
 }
