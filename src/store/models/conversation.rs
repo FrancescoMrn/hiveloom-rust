@@ -126,6 +126,67 @@ impl Conversation {
         }
     }
 
+    /// List recent conversations for a specific user with a specific agent (MCP chat layer).
+    pub fn list_by_user_and_agent(
+        conn: &Connection,
+        tenant_id: Uuid,
+        agent_id: Uuid,
+        user_identity: &str,
+        limit: i64,
+    ) -> Result<Vec<Conversation>> {
+        let sql = format!(
+            "SELECT {} FROM conversations
+             WHERE tenant_id = ?1 AND agent_id = ?2 AND user_identity = ?3
+               AND surface_type = 'mcp'
+             ORDER BY updated_at DESC LIMIT ?4",
+            CONV_COLS
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            params![
+                tenant_id.to_string(),
+                agent_id.to_string(),
+                user_identity,
+                limit
+            ],
+            row_to_conversation,
+        )?;
+        let mut convs = Vec::new();
+        for row in rows {
+            convs.push(row?);
+        }
+        Ok(convs)
+    }
+
+    /// Load a specific conversation enforcing tenant/agent/user scoping.
+    pub fn get_by_id_scoped(
+        conn: &Connection,
+        id: Uuid,
+        tenant_id: Uuid,
+        agent_id: Uuid,
+        user_identity: &str,
+    ) -> Result<Option<Conversation>> {
+        let sql = format!(
+            "SELECT {} FROM conversations
+             WHERE id = ?1 AND tenant_id = ?2 AND agent_id = ?3 AND user_identity = ?4",
+            CONV_COLS
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let mut rows = stmt.query_map(
+            params![
+                id.to_string(),
+                tenant_id.to_string(),
+                agent_id.to_string(),
+                user_identity
+            ],
+            row_to_conversation,
+        )?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
     pub fn update_status(conn: &Connection, id: Uuid, status: &str) -> Result<()> {
         let now = chrono::Utc::now().to_rfc3339();
         let (concluded, abandoned) = match status {
@@ -209,6 +270,35 @@ impl ConversationTurn {
             ],
         )?;
         Ok(turn)
+    }
+
+    /// Get the last assistant turn for a conversation (used for previews in list_conversations).
+    pub fn get_last_assistant_turn(
+        conn: &Connection,
+        conversation_id: Uuid,
+    ) -> Result<Option<ConversationTurn>> {
+        let mut stmt = conn.prepare(
+            "SELECT id, tenant_id, conversation_id, turn_index, role, content, token_count, created_at
+             FROM conversation_turns
+             WHERE conversation_id = ?1 AND role = 'assistant'
+             ORDER BY turn_index DESC LIMIT 1",
+        )?;
+        let mut rows = stmt.query_map(params![conversation_id.to_string()], |row| {
+            Ok(ConversationTurn {
+                id: row.get::<_, String>(0)?.parse().unwrap(),
+                tenant_id: row.get::<_, String>(1)?.parse().unwrap(),
+                conversation_id: row.get::<_, String>(2)?.parse().unwrap(),
+                turn_index: row.get(3)?,
+                role: row.get(4)?,
+                content: row.get(5)?,
+                token_count: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
     }
 
     pub fn list_by_conversation(

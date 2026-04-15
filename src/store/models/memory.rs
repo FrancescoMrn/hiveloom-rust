@@ -128,6 +128,43 @@ impl MemoryEntry {
         Ok(entries)
     }
 
+    /// Search memory entries by query text matching key or value (MCP memory tool).
+    pub fn search_by_query(
+        conn: &Connection,
+        tenant_id: Uuid,
+        agent_id: Uuid,
+        user_identity: &str,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<MemoryEntry>> {
+        let user_scope = format!("user:{}", user_identity);
+        let pattern = format!("%{}%", query);
+        let sql = format!(
+            "SELECT {} FROM memory_entries
+             WHERE tenant_id = ?1 AND agent_id = ?2 AND archived = 0
+               AND (scope = 'tenant' OR scope = ?3)
+               AND (key LIKE ?4 OR value LIKE ?4)
+             ORDER BY updated_at DESC LIMIT ?5",
+            SELECT_COLS
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            params![
+                tenant_id.to_string(),
+                agent_id.to_string(),
+                user_scope,
+                pattern,
+                limit
+            ],
+            row_to_memory,
+        )?;
+        let mut entries = Vec::new();
+        for row in rows {
+            entries.push(row?);
+        }
+        Ok(entries)
+    }
+
     pub fn delete(conn: &Connection, id: Uuid) -> Result<()> {
         conn.execute(
             "DELETE FROM memory_entries WHERE id = ?1",
