@@ -17,6 +17,7 @@ pub mod schedule;
 pub mod serve;
 pub mod tenant;
 pub mod top;
+pub mod tui;
 pub mod upgrade;
 
 use clap::{Parser, Subcommand};
