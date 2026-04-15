@@ -27,34 +27,39 @@ cargo build --release
 
 ## 1. Quick start with interactive mode
 
-The fastest way to get going — the interactive shell guides you through setup:
+The fastest way to get going — the interactive shell has a menu-driven UI:
 
 ```bash
 ./target/release/hiveloom
 ```
 
-On a fresh install, it detects no credentials/agents and prompts:
+On launch you see a main menu with 6 categories:
 
 ```
-Welcome! This looks like a fresh install.
-Type /setup to get started, or /help for all commands.
+╭──────────────────────────────────────────────────────╮
+│  hiveloom                                            │
+│  ● online   0 agents   0 credentials   default       │
+╰──────────────────────────────────────────────────────╯
+
+  ▸ Setup          Get started with guided setup     →
+    Agents         Create and manage AI agents
+    Chat           Talk to your agents
+    Credentials    API keys and secrets
+    MCP            External client access
+    System         Health, backups, logs
 ```
 
-Type `/setup` and follow the 5-step wizard:
+Navigate with arrow keys and Enter. On a fresh install, select **Setup** to
+run the 5-step onboarding wizard:
 
-1. **Start service** — starts `hiveloom serve` in the background
-2. **Enter API key** — paste your Anthropic (`sk-ant-...`) or OpenAI key
-3. **Create agent** — name, model, and system prompt
-4. **MCP identity** — creates identity and displays the MCP URL + setup code
-5. **Test chat** — sends a message and shows the agent's response
+1. **Service** — checks status, starts if offline
+2. **API Key** — masked input for your Anthropic or OpenAI key
+3. **Agent** — create your first agent (name, system prompt)
+4. **MCP** — creates identity, shows MCP URL + setup code
+5. **Test Chat** — sends a message and shows the agent's response
 
-After setup, you can chat directly in the interactive shell:
-
-```
-> chat support-bot
-you: Hello!
-support-bot: Hi! How can I help you today?
-```
+After setup, go to **Chat** to talk to your agent, or **Agents** to manage
+agents with inline forms and context panels
 
 ---
 
@@ -259,46 +264,55 @@ curl -s -X POST http://127.0.0.1:3000/mcp/default/support-bot \
 
 ## 5. Interactive mode
 
-The interactive CLI is launched by running `hiveloom` with no subcommand:
+The interactive CLI is a menu-driven TUI launched by running `hiveloom` with
+no subcommand:
 
 ```bash
 ./target/release/hiveloom
 ```
 
-### All CLI commands work inside interactive mode
+### Menu-driven navigation
 
-Type any command without the `hiveloom` prefix:
+The main screen shows 6 categories. Navigate with arrow keys, press Enter
+to open a category. Each category has:
 
-```
-> agent list
-> credential list
-> capability list support-bot
-> mcp-identity list --tenant default
-> health
-> status
-```
+- **Left panel**: Available actions (Create, Add Skill, etc.)
+- **Right panel**: Context table showing existing items (agents, credentials, etc.)
+- **Tab**: Switch focus between action panel and context panel
+- **Enter on context item**: Opens an action popup (Chat, Edit, Delete, etc.)
 
-### Slash commands (interactive-only)
+### Categories
 
-| Command    | Description                              |
-|------------|------------------------------------------|
-| `/setup`   | Guided first-time setup wizard           |
-| `/help`    | Show all commands                        |
-| `/clear`   | Clear transcript                         |
-| `/exit`    | Exit chat mode or quit                   |
-| `/top`     | Open live dashboard                      |
+| Category       | Context Panel           | Actions                              |
+|----------------|-------------------------|--------------------------------------|
+| **Setup**      | —                       | 5-step onboarding wizard             |
+| **Agents**     | Agent table             | Create, Add Skill, Export            |
+| **Chat**       | —                       | Opens chat with first agent          |
+| **Credentials**| Credential list         | Set, Rotate, Remove                  |
+| **MCP**        | Identity list           | Create Identity, Reissue Code        |
+| **System**     | —                       | Health, Status, Doctor, Backup, Logs |
+
+### Inline forms
+
+Create/edit operations render forms within the TUI — no need to exit to a
+terminal. Forms support text fields, masked input (for API keys), and
+selection lists (for model choice).
+
+### Command bar (power users)
+
+Press `:` from any screen to open a vim-style command bar with autocomplete.
+Type any CLI command (e.g., `agent list`, `credential set anthropic`).
 
 ### Key bindings
 
-| Key       | Action                              |
-|-----------|-------------------------------------|
-| Tab       | Autocomplete to selected suggestion |
-| Up/Down   | Navigate suggestions / command history |
-| PageUp/Dn | Scroll transcript                   |
-| Enter     | Execute command / send chat message |
-| Esc       | Exit chat mode, or clear input, or quit |
-| Ctrl-C    | Quit                                |
-| Ctrl-L    | Clear transcript                    |
+| Key       | Action                                    |
+|-----------|-------------------------------------------|
+| ↑ / ↓     | Navigate menu items / context panel rows  |
+| Enter     | Select menu item / submit form / send chat |
+| Tab       | Switch panel focus / next form field      |
+| Esc       | Go back one level                         |
+| `:`       | Open command bar                          |
+| Ctrl-C    | Quit                                      |
 
 ---
 
