@@ -43,7 +43,7 @@ pub async fn run_agent_loop(
     )?;
 
     // 3. T019: Pre-LLM-call compaction check
-    let system_context = build_system_context(&invocation.agent, &memories);
+    let system_context = build_system_context(&invocation.agent, &memories, &invocation.capabilities);
     let compaction_outcome = CompactionEngine::check_and_compact(
         conn,
         provider,
@@ -87,10 +87,11 @@ pub async fn run_agent_loop(
         });
     }
 
-    // 6. Build tool definitions from capabilities
+    // 6. Build tool definitions from capabilities (skip markdown skills — they are context, not tools)
     let tools: Vec<ToolDefinition> = invocation
         .capabilities
         .iter()
+        .filter(|c| c.auth_type != "markdown")
         .map(|c| ToolDefinition {
             name: c.name.clone(),
             description: c.description.clone(),
@@ -210,7 +211,7 @@ pub async fn run_agent_loop_with_vault(
     )?;
 
     // 3. T019: Pre-LLM-call compaction check (vault-enabled loop)
-    let system_context = build_system_context(&invocation.agent, &memories);
+    let system_context = build_system_context(&invocation.agent, &memories, &invocation.capabilities);
     let compaction_outcome = CompactionEngine::check_and_compact(
         conn,
         provider,
@@ -253,10 +254,11 @@ pub async fn run_agent_loop_with_vault(
         });
     }
 
-    // 6. Build tool definitions from capabilities
+    // 6. Build tool definitions from capabilities (skip markdown skills — they are context, not tools)
     let tools: Vec<ToolDefinition> = invocation
         .capabilities
         .iter()
+        .filter(|c| c.auth_type != "markdown")
         .map(|c| ToolDefinition {
             name: c.name.clone(),
             description: c.description.clone(),
@@ -351,8 +353,22 @@ pub async fn run_agent_loop_with_vault(
     })
 }
 
-fn build_system_context(agent: &Agent, memories: &[MemoryEntry]) -> String {
+fn build_system_context(
+    agent: &Agent,
+    memories: &[MemoryEntry],
+    capabilities: &[Capability],
+) -> String {
     let mut ctx = agent.system_prompt.clone();
+
+    // Inject markdown skill content into system prompt
+    for cap in capabilities {
+        if cap.auth_type == "markdown" {
+            if let Some(ref content) = cap.instruction_content {
+                ctx.push_str(&format!("\n\n## Skill: {}\n{}\n", cap.name, content));
+            }
+        }
+    }
+
     if !memories.is_empty() {
         ctx.push_str("\n\n## Relevant Knowledge\n");
         for mem in memories {

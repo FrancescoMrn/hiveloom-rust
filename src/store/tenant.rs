@@ -367,6 +367,10 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
          ALTER TABLE mcp_client_registrations ADD COLUMN code_challenge_method TEXT;
          ALTER TABLE mcp_client_registrations ADD COLUMN redirect_uri TEXT;",
     ),
+    (
+        "0023_add_instruction_content_to_capabilities",
+        "ALTER TABLE capabilities ADD COLUMN instruction_content TEXT;",
+    ),
 ];
 
 pub struct TenantStore {

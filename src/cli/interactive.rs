@@ -1,7 +1,5 @@
-use std::fs::OpenOptions;
 use std::io;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command as ProcessCommand, Stdio};
 use std::time::{Duration, Instant};
 
 use crossterm::{
@@ -19,95 +17,98 @@ use super::client::ApiClient;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum DeferredAction {
-    Dashboard,
-    SetupCredential,
-    SetupAgent,
+// ── Command registry ────────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct CommandEntry {
+    path: String,
+    description: String,
 }
 
-#[derive(Clone, Copy)]
-struct SlashCommand {
-    name: &'static str,
-    title: &'static str,
-    description: &'static str,
-    aliases: &'static [&'static str],
+fn build_command_registry() -> Vec<CommandEntry> {
+    use clap::CommandFactory;
+    let mut entries = Vec::new();
+    let app = super::Cli::command();
+    for sub in app.get_subcommands() {
+        let name = sub.get_name().to_string();
+        // Skip commands that don't make sense inside interactive mode
+        if name == "interactive" || name == "serve" || name == "version" {
+            continue;
+        }
+        let about = sub
+            .get_about()
+            .map(|a| a.to_string())
+            .unwrap_or_default();
+        let has_subcommands = sub.get_subcommands().next().is_some();
+        if has_subcommands {
+            for subsub in sub.get_subcommands() {
+                let sub_name = subsub.get_name();
+                let sub_about = subsub
+                    .get_about()
+                    .map(|a| a.to_string())
+                    .unwrap_or(about.clone());
+                entries.push(CommandEntry {
+                    path: format!("{} {}", name, sub_name),
+                    description: sub_about,
+                });
+            }
+        } else {
+            entries.push(CommandEntry {
+                path: name,
+                description: about,
+            });
+        }
+    }
+    // Add interactive-only slash commands
+    entries.push(CommandEntry {
+        path: "/setup".to_string(),
+        description: "Guided first-time setup wizard".to_string(),
+    });
+    entries.push(CommandEntry {
+        path: "/clear".to_string(),
+        description: "Clear transcript".to_string(),
+    });
+    entries.push(CommandEntry {
+        path: "/help".to_string(),
+        description: "Show all commands".to_string(),
+    });
+    entries.push(CommandEntry {
+        path: "/exit".to_string(),
+        description: "Exit interactive mode".to_string(),
+    });
+    entries
 }
 
-const COMMANDS: &[SlashCommand] = &[
-    SlashCommand {
-        name: "start",
-        title: "Start service",
-        description: "Launch the local Hiveloom service in the background.",
-        aliases: &["serve", "boot", "run service", "start service"],
-    },
-    SlashCommand {
-        name: "health",
-        title: "Health",
-        description: "Check whether the local instance responds on /healthz.",
-        aliases: &["ping", "ready", "check health"],
-    },
-    SlashCommand {
-        name: "status",
-        title: "Status",
-        description: "Summarize tenants, agents, credentials, backups, and endpoint state.",
-        aliases: &["summary", "overview", "what next", "show status"],
-    },
-    SlashCommand {
-        name: "agents",
-        title: "Agents",
-        description: "List the current agents in the default tenant.",
-        aliases: &["list agents", "agent list", "show agents"],
-    },
-    SlashCommand {
-        name: "credentials",
-        title: "Credentials",
-        description: "List stored provider credentials without exposing secret values.",
-        aliases: &["credentials list", "creds", "keys", "show credentials"],
-    },
-    SlashCommand {
-        name: "backups",
-        title: "Backups",
-        description: "List backup archives recorded for the local instance.",
-        aliases: &["backup list", "archives", "show backups"],
-    },
-    SlashCommand {
-        name: "doctor",
-        title: "Doctor",
-        description: "Run local filesystem and store checks against the active data dir.",
-        aliases: &["diag", "diagnostics", "run doctor"],
-    },
-    SlashCommand {
-        name: "create-agent",
-        title: "Create agent",
-        description: "Show the next recommended agent command based on current setup.",
-        aliases: &["new agent", "agent create", "create an agent"],
-    },
-    SlashCommand {
-        name: "top",
-        title: "Live dashboard",
-        description: "Open `hiveloom top` for the live terminal dashboard.",
-        aliases: &["dashboard", "monitor", "open dashboard"],
-    },
-    SlashCommand {
-        name: "setup",
-        title: "First-time setup",
-        description: "Guided wizard: start service, store API key, create first agent.",
-        aliases: &["init", "wizard", "first run", "onboarding", "get started", "initialize"],
-    },
-    SlashCommand {
-        name: "help",
-        title: "Help",
-        description: "Show command examples and launcher shortcuts.",
-        aliases: &["commands", "menu", "show help"],
-    },
-    SlashCommand {
-        name: "quit",
-        title: "Quit",
-        description: "Leave the interactive CLI.",
-        aliases: &["exit", "close", "quit interactive"],
-    },
-];
+fn filter_suggestions(registry: &[CommandEntry], query: &str) -> Vec<usize> {
+    if query.trim().is_empty() {
+        return Vec::new();
+    }
+    let q = query.trim().to_lowercase();
+    let mut scored: Vec<(usize, i32)> = registry
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| {
+            let path = entry.path.to_lowercase();
+            let score = if path == q {
+                120
+            } else if path.starts_with(&q) {
+                100
+            } else if path.contains(&q) {
+                70
+            } else if entry.description.to_lowercase().contains(&q) {
+                40
+            } else {
+                0
+            };
+            (i, score)
+        })
+        .filter(|(_, s)| *s > 0)
+        .collect();
+    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored.into_iter().take(6).map(|(i, _)| i).collect()
+}
+
+// ── Overview (polled state) ─────────────────────────────────────────────
 
 #[derive(Debug, Default, Clone)]
 struct Overview {
@@ -116,7 +117,6 @@ struct Overview {
     tenants: Vec<TenantSummary>,
     agents: Vec<AgentSummary>,
     credentials: Vec<CredentialSummary>,
-    backups: Vec<BackupSummary>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -126,9 +126,10 @@ struct TenantSummary {
     #[serde(default)]
     slug: String,
 }
-
 #[derive(Debug, Deserialize, Clone)]
 struct AgentSummary {
+    #[serde(default)]
+    id: String,
     #[serde(default)]
     name: String,
     #[serde(default)]
@@ -136,7 +137,6 @@ struct AgentSummary {
     #[serde(default)]
     status: String,
 }
-
 #[derive(Debug, Deserialize, Clone)]
 struct CredentialSummary {
     #[serde(default)]
@@ -145,54 +145,181 @@ struct CredentialSummary {
     kind: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-struct BackupSummary {
-    #[serde(default)]
-    filename: String,
-    #[serde(default)]
-    size_bytes: u64,
+async fn fetch_overview(client: &ApiClient) -> Overview {
+    let endpoint = crate::cli::local::default_endpoint();
+    let service_running = client
+        .get_raw("/healthz")
+        .await
+        .map(|s| s.is_success())
+        .unwrap_or(false);
+    let tenants: Vec<TenantSummary> = client.get("/api/tenants").await.unwrap_or_default();
+    let agents: Vec<AgentSummary> = client
+        .get("/api/tenants/default/agents")
+        .await
+        .unwrap_or_default();
+    let credentials: Vec<CredentialSummary> = client
+        .get("/api/tenants/default/credentials")
+        .await
+        .unwrap_or_default();
+    Overview {
+        endpoint,
+        service_running,
+        tenants,
+        agents,
+        credentials,
+    }
 }
 
+// ── Chat response ───────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct ChatResponse {
+    response: String,
+    conversation_id: String,
+    #[serde(default)]
+    capabilities_used: Vec<String>,
+}
+
+// ── Transcript entry ────────────────────────────────────────────────────
+
 #[derive(Clone, Copy)]
-enum EntryTone {
+enum Tone {
     System,
     Success,
     Warning,
     Info,
+    User,
+    Agent,
 }
 
-struct TranscriptEntry {
-    tone: EntryTone,
-    title: String,
-    body: Vec<String>,
+struct Entry {
+    tone: Tone,
+    label: String,
+    lines: Vec<String>,
 }
 
-struct InteractiveApp {
+// ── App state ───────────────────────────────────────────────────────────
+
+enum AppMode {
+    Command,
+    Chat {
+        agent_name: String,
+        agent_id: String,
+        conversation_id: Option<String>,
+    },
+}
+
+struct App {
     client: ApiClient,
     overview: Overview,
+    registry: Vec<CommandEntry>,
     input: String,
     cursor: usize,
-    transcript: Vec<TranscriptEntry>,
+    transcript: Vec<Entry>,
     suggestions: Vec<usize>,
     selected_suggestion: usize,
     last_refresh: Instant,
+    mode: AppMode,
+    history: Vec<String>,
+    history_idx: Option<usize>,
+    scroll_offset: u16,
+    should_auto_scroll: bool,
 }
 
-enum InteractiveExit {
+enum ExitAction {
     Quit,
-    Run(DeferredAction),
+    Dashboard,
+    RunSetup,
 }
+
+impl App {
+    async fn new(client: ApiClient) -> Self {
+        let overview = fetch_overview(&client).await;
+        let registry = build_command_registry();
+        let is_fresh = overview.credentials.is_empty() && overview.agents.is_empty();
+
+        let mut transcript = vec![Entry {
+            tone: Tone::System,
+            label: "hiveloom".to_string(),
+            lines: if is_fresh {
+                vec![
+                    "Welcome! This looks like a fresh install.".to_string(),
+                    "Type /setup to get started, or /help for all commands.".to_string(),
+                ]
+            } else {
+                vec!["Ready. Type a command or /help for the full list.".to_string()]
+            },
+        }];
+
+        if overview.service_running && !overview.agents.is_empty() {
+            transcript.push(Entry {
+                tone: Tone::Info,
+                label: "tip".to_string(),
+                lines: vec![format!(
+                    "Try: chat {}",
+                    overview.agents[0].name
+                )],
+            });
+        }
+
+        Self {
+            client,
+            overview,
+            registry,
+            input: String::new(),
+            cursor: 0,
+            transcript,
+            suggestions: Vec::new(),
+            selected_suggestion: 0,
+            last_refresh: Instant::now(),
+            mode: AppMode::Command,
+            history: Vec::new(),
+            history_idx: None,
+            scroll_offset: 0,
+            should_auto_scroll: true,
+        }
+    }
+
+    async fn refresh(&mut self) {
+        self.overview = fetch_overview(&self.client).await;
+        self.last_refresh = Instant::now();
+    }
+
+    fn sync_suggestions(&mut self) {
+        if matches!(self.mode, AppMode::Chat { .. }) {
+            self.suggestions.clear();
+            return;
+        }
+        self.suggestions = filter_suggestions(&self.registry, &self.input);
+        if self.selected_suggestion >= self.suggestions.len() {
+            self.selected_suggestion = 0;
+        }
+    }
+
+    fn log(&mut self, tone: Tone, label: impl Into<String>, lines: Vec<String>) {
+        self.transcript.push(Entry {
+            tone,
+            label: label.into(),
+            lines,
+        });
+        if self.transcript.len() > 200 {
+            self.transcript.drain(0..50);
+        }
+        self.should_auto_scroll = true;
+    }
+}
+
+// ── Main entry ──────────────────────────────────────────────────────────
 
 pub async fn run() -> anyhow::Result<()> {
     let client = ApiClient::new(None, None);
-    let mut app = InteractiveApp::new(client).await;
+    let mut app = App::new(client).await;
 
     loop {
-        let exit = run_shell(&mut app).await?;
-
+        let exit = run_tui(&mut app).await?;
         match exit {
-            InteractiveExit::Quit => return Ok(()),
-            InteractiveExit::Run(DeferredAction::Dashboard) => {
+            ExitAction::Quit => return Ok(()),
+            ExitAction::Dashboard => {
                 return super::top::run(super::top::TopArgs {
                     endpoint: None,
                     token: None,
@@ -200,235 +327,24 @@ pub async fn run() -> anyhow::Result<()> {
                 })
                 .await;
             }
-            InteractiveExit::Run(DeferredAction::SetupCredential) => {
-                // Temporarily leave TUI to collect API key
-                run_setup_credential(&mut app).await?;
-                // Re-enter the shell loop
-            }
-            InteractiveExit::Run(DeferredAction::SetupAgent) => {
-                run_setup_agent(&mut app).await?;
+            ExitAction::RunSetup => {
+                run_setup(&mut app).await?;
+                // Re-enter TUI
             }
         }
     }
 }
 
-/// Collect API key outside the TUI (needs raw terminal input).
-async fn run_setup_credential(app: &mut InteractiveApp) -> anyhow::Result<()> {
-    use std::io::Write;
+// ── TUI loop ────────────────────────────────────────────────────────────
 
-    println!();
-    println!("  Enter your LLM API key (input is hidden):");
-    println!("  Anthropic keys start with sk-ant-...");
-    println!("  OpenAI keys start with sk-...");
-    println!();
-    print!("  API Key: ");
-    io::stdout().flush()?;
-
-    // Read the key (not masked in basic terminals, but we keep it simple)
-    let mut key = String::new();
-    io::stdin().read_line(&mut key)?;
-    let key = key.trim().to_string();
-
-    if key.is_empty() {
-        app.log(EntryTone::Warning, "setup", vec!["No key entered. Skipping credential setup.".to_string()]);
-        return Ok(());
-    }
-
-    // Detect provider
-    let cred_name = if key.starts_with("sk-ant-") {
-        "anthropic"
-    } else {
-        "openai"
-    };
-
-    // Store via API
-    let endpoint = crate::cli::local::default_endpoint();
-    let url = format!("{}/api/tenants/default/credentials", endpoint);
-    let client = reqwest::Client::new();
-    let resp = client.post(&url)
-        .json(&serde_json::json!({
-            "name": cred_name,
-            "kind": "static",
-            "secret": key,
-        }))
-        .send()
-        .await;
-
-    match resp {
-        Ok(r) if r.status().is_success() => {
-            app.log(EntryTone::Success, "setup [2/3]", vec![
-                format!("Stored credential '{}' successfully.", cred_name),
-            ]);
-        }
-        Ok(r) => {
-            let status = r.status();
-            let body = r.text().await.unwrap_or_default();
-            app.log(EntryTone::Warning, "setup", vec![
-                format!("Failed to store credential: {} {}", status, body),
-            ]);
-        }
-        Err(e) => {
-            app.log(EntryTone::Warning, "setup", vec![
-                format!("Failed to store credential: {}", e),
-            ]);
-        }
-    }
-
-    app.refresh().await;
-
-    // Continue to step 3 if no agents
-    if app.overview.agents.is_empty() {
-        app.log(EntryTone::System, "setup [3/3]", vec![
-            "Now let's create your first agent.".to_string(),
-        ]);
-    }
-
-    Ok(())
-}
-
-/// Create a default agent outside the TUI.
-async fn run_setup_agent(app: &mut InteractiveApp) -> anyhow::Result<()> {
-    use std::io::Write;
-
-    println!();
-    println!("  Create your first agent:");
-    println!();
-
-    // Agent name
-    print!("  Agent name [support-bot]: ");
-    io::stdout().flush()?;
-    let mut name = String::new();
-    io::stdin().read_line(&mut name)?;
-    let name = name.trim();
-    let name = if name.is_empty() { "support-bot" } else { name };
-
-    // Model
-    let model = if app.overview.credentials.iter().any(|c| c.name == "anthropic") {
-        "claude-sonnet-4-20250514"
-    } else {
-        "gpt-4o"
-    };
-
-    // System prompt
-    print!("  System prompt [You are a helpful assistant.]: ");
-    io::stdout().flush()?;
-    let mut prompt = String::new();
-    io::stdin().read_line(&mut prompt)?;
-    let prompt = prompt.trim();
-    let prompt = if prompt.is_empty() { "You are a helpful assistant." } else { prompt };
-
-    println!();
-    println!("  Creating agent '{}' with model '{}'...", name, model);
-
-    let endpoint = crate::cli::local::default_endpoint();
-    let url = format!("{}/api/tenants/default/agents", endpoint);
-    let client = reqwest::Client::new();
-    let resp = client.post(&url)
-        .json(&serde_json::json!({
-            "name": name,
-            "model_id": model,
-            "system_prompt": prompt,
-            "scope_mode": "dual",
-        }))
-        .send()
-        .await;
-
-    match resp {
-        Ok(r) if r.status().is_success() => {
-            app.log(EntryTone::Success, "setup [3/3]", vec![
-                format!("Agent '{}' created successfully!", name),
-                "Your instance is ready. Use `/top` for the dashboard.".to_string(),
-            ]);
-        }
-        Ok(r) => {
-            let status = r.status();
-            let body = r.text().await.unwrap_or_default();
-            app.log(EntryTone::Warning, "setup", vec![
-                format!("Failed to create agent: {} {}", status, body),
-            ]);
-        }
-        Err(e) => {
-            app.log(EntryTone::Warning, "setup", vec![
-                format!("Failed to create agent: {}", e),
-            ]);
-        }
-    }
-
-    app.refresh().await;
-    Ok(())
-}
-
-impl InteractiveApp {
-    async fn new(client: ApiClient) -> Self {
-        let overview = fetch_overview(&client).await;
-        let is_fresh = overview.credentials.is_empty() && overview.agents.is_empty();
-        let transcript = vec![TranscriptEntry {
-            tone: EntryTone::System,
-            title: "ready".to_string(),
-            body: if is_fresh {
-                vec![
-                    "Welcome to Hiveloom! It looks like this is a fresh install.".to_string(),
-                    "Type `/setup` to run the guided first-time setup (service + API key + agent).".to_string(),
-                ]
-            } else {
-                vec![
-                    "Type a full command or plain request. Tab completes. Use `/help` for the command list."
-                        .to_string(),
-                ]
-            },
-        }];
-
-        Self {
-            client,
-            overview,
-            input: String::new(),
-            cursor: 0,
-            transcript,
-            suggestions: Vec::new(),
-            selected_suggestion: 0,
-            last_refresh: Instant::now(),
-        }
-    }
-
-    async fn refresh(&mut self) {
-        self.overview = fetch_overview(&self.client).await;
-        self.last_refresh = Instant::now();
-        self.sync_suggestions();
-    }
-
-    fn sync_suggestions(&mut self) {
-        if self.input.trim().is_empty() {
-            self.suggestions.clear();
-            self.selected_suggestion = 0;
-            return;
-        }
-        self.suggestions = ranked_commands(&self.input);
-        if self.selected_suggestion >= self.suggestions.len() {
-            self.selected_suggestion = 0;
-        }
-    }
-
-    fn log(&mut self, tone: EntryTone, title: impl Into<String>, body: Vec<String>) {
-        self.transcript.push(TranscriptEntry {
-            tone,
-            title: title.into(),
-            body,
-        });
-        if self.transcript.len() > 12 {
-            let excess = self.transcript.len() - 12;
-            self.transcript.drain(0..excess);
-        }
-    }
-}
-
-async fn run_shell(app: &mut InteractiveApp) -> anyhow::Result<InteractiveExit> {
+async fn run_tui(app: &mut App) -> anyhow::Result<ExitAction> {
     let mut stdout = io::stdout();
     terminal::enable_raw_mode()?;
     execute!(stdout, EnterAlternateScreen)?;
     let backend = ratatui::backend::CrosstermBackend::new(stdout);
     let mut terminal = ratatui::Terminal::new(backend)?;
 
-    let result = shell_loop(&mut terminal, app).await;
+    let result = tui_loop(&mut terminal, app).await;
 
     terminal::disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -437,16 +353,16 @@ async fn run_shell(app: &mut InteractiveApp) -> anyhow::Result<InteractiveExit> 
     result
 }
 
-async fn shell_loop(
+async fn tui_loop(
     terminal: &mut ratatui::Terminal<ratatui::backend::CrosstermBackend<io::Stdout>>,
-    app: &mut InteractiveApp,
-) -> anyhow::Result<InteractiveExit> {
+    app: &mut App,
+) -> anyhow::Result<ExitAction> {
     loop {
         if app.last_refresh.elapsed() >= REFRESH_INTERVAL {
             app.refresh().await;
         }
 
-        terminal.draw(|f| render_shell(f, app))?;
+        terminal.draw(|f| render(f, app))?;
 
         if !event::poll(Duration::from_millis(200))? {
             continue;
@@ -461,35 +377,65 @@ async fn shell_loop(
 
         match key.code {
             KeyCode::Esc => {
-                if app.input.is_empty() {
-                    return Ok(InteractiveExit::Quit);
+                if matches!(app.mode, AppMode::Chat { .. }) {
+                    app.log(Tone::System, "chat", vec!["Exited chat mode.".to_string()]);
+                    app.mode = AppMode::Command;
+                    app.input.clear();
+                    app.cursor = 0;
+                    app.sync_suggestions();
+                } else if app.input.is_empty() {
+                    return Ok(ExitAction::Quit);
+                } else {
+                    app.input.clear();
+                    app.cursor = 0;
+                    app.sync_suggestions();
                 }
-                app.input.clear();
-                app.cursor = 0;
-                app.sync_suggestions();
             }
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Ok(InteractiveExit::Quit);
+                return Ok(ExitAction::Quit);
             }
             KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 app.transcript.clear();
-                app.log(
-                    EntryTone::System,
-                    "cleared",
-                    vec![
-                        "Transcript cleared. Type `/help` if you want a quick refresher."
-                            .to_string(),
-                    ],
-                );
+                app.scroll_offset = 0;
+            }
+            KeyCode::PageUp => {
+                app.scroll_offset = app.scroll_offset.saturating_add(10);
+                app.should_auto_scroll = false;
+            }
+            KeyCode::PageDown => {
+                app.scroll_offset = app.scroll_offset.saturating_sub(10);
+                if app.scroll_offset == 0 {
+                    app.should_auto_scroll = true;
+                }
             }
             KeyCode::Up => {
-                if app.selected_suggestion > 0 {
-                    app.selected_suggestion -= 1;
+                if !app.suggestions.is_empty() {
+                    app.selected_suggestion = app.selected_suggestion.saturating_sub(1);
+                } else if !app.history.is_empty() {
+                    let idx = match app.history_idx {
+                        Some(i) => i.saturating_sub(1),
+                        None => app.history.len() - 1,
+                    };
+                    app.history_idx = Some(idx);
+                    app.input = app.history[idx].clone();
+                    app.cursor = app.input.len();
                 }
             }
             KeyCode::Down => {
-                if app.selected_suggestion + 1 < app.suggestions.len() {
-                    app.selected_suggestion += 1;
+                if !app.suggestions.is_empty() {
+                    if app.selected_suggestion + 1 < app.suggestions.len() {
+                        app.selected_suggestion += 1;
+                    }
+                } else if let Some(idx) = app.history_idx {
+                    if idx + 1 < app.history.len() {
+                        app.history_idx = Some(idx + 1);
+                        app.input = app.history[idx + 1].clone();
+                        app.cursor = app.input.len();
+                    } else {
+                        app.history_idx = None;
+                        app.input.clear();
+                        app.cursor = 0;
+                    }
                 }
             }
             KeyCode::Left => {
@@ -508,10 +454,14 @@ async fn shell_loop(
                 }
             }
             KeyCode::Tab => {
-                autocomplete(app);
+                if let Some(&idx) = app.suggestions.get(app.selected_suggestion) {
+                    app.input = app.registry[idx].path.clone();
+                    app.cursor = app.input.len();
+                    app.sync_suggestions();
+                }
             }
             KeyCode::Enter => {
-                if let Some(exit) = submit_input(app).await? {
+                if let Some(exit) = handle_enter(app).await? {
                     return Ok(exit);
                 }
             }
@@ -520,6 +470,7 @@ async fn shell_loop(
                     app.input.insert(app.cursor, c);
                     app.cursor += 1;
                     app.sync_suggestions();
+                    app.history_idx = None;
                 }
             }
             _ => {}
@@ -527,670 +478,650 @@ async fn shell_loop(
     }
 }
 
-async fn submit_input(app: &mut InteractiveApp) -> anyhow::Result<Option<InteractiveExit>> {
-    let query = app.input.trim().to_string();
-    if query.is_empty() {
+// ── Input handling ──────────────────────────────────────────────────────
+
+async fn handle_enter(app: &mut App) -> anyhow::Result<Option<ExitAction>> {
+    let input = app.input.trim().to_string();
+    if input.is_empty() {
         return Ok(None);
     }
 
-    app.log(EntryTone::Info, "you", vec![query.clone()]);
+    // Save to history
+    if app.history.last().map(|h| h.as_str()) != Some(&input) {
+        app.history.push(input.clone());
+        if app.history.len() > 50 {
+            app.history.remove(0);
+        }
+    }
+    app.history_idx = None;
     app.input.clear();
     app.cursor = 0;
     app.sync_suggestions();
 
-    let resolution = resolve_command(&query);
-    let (command, guessed) = match resolution {
-        Some(value) => value,
-        None => {
+    // Chat mode: send message to agent
+    if matches!(app.mode, AppMode::Chat { .. }) {
+        if input == "/exit" {
+            app.log(Tone::System, "chat", vec!["Exited chat mode.".to_string()]);
+            app.mode = AppMode::Command;
+            return Ok(None);
+        }
+
+        // Extract what we need before borrowing app mutably
+        let (agent_name, agent_id, conv_id) = match &app.mode {
+            AppMode::Chat { agent_name, agent_id, conversation_id } => {
+                (agent_name.clone(), agent_id.clone(), conversation_id.clone())
+            }
+            _ => unreachable!(),
+        };
+
+        app.log(Tone::User, "you", vec![input.clone()]);
+
+        let mut body = serde_json::json!({ "message": input });
+        if let Some(ref cid) = conv_id {
+            body["conversation_id"] = serde_json::Value::String(cid.clone());
+        }
+
+        let tid = app
+            .overview
+            .tenants
+            .first()
+            .map(|t| t.slug.as_str())
+            .unwrap_or("default");
+
+        match app
+            .client
+            .post::<_, ChatResponse>(
+                &format!("/api/tenants/{}/agents/{}/chat", tid, agent_id),
+                &body,
+            )
+            .await
+        {
+            Ok(resp) => {
+                let new_cid = resp.conversation_id.clone();
+                let mut lines = vec![resp.response];
+                if !resp.capabilities_used.is_empty() {
+                    lines.push(format!(
+                        "  [capabilities: {}]",
+                        resp.capabilities_used.join(", ")
+                    ));
+                }
+                app.log(Tone::Agent, &agent_name, lines);
+                // Update conversation_id
+                if let AppMode::Chat { ref mut conversation_id, .. } = app.mode {
+                    *conversation_id = Some(new_cid);
+                }
+            }
+            Err(e) => {
+                app.log(
+                    Tone::Warning,
+                    "error",
+                    vec![format!("Chat failed: {}", e)],
+                );
+            }
+        }
+        return Ok(None);
+    }
+
+    // Slash commands (interactive-only)
+    if input.starts_with('/') {
+        return handle_slash_command(app, &input).await;
+    }
+
+    // Check if this is a "chat <agent>" command
+    if let Some(agent_name) = input.strip_prefix("chat ") {
+        let agent_name = agent_name.trim().to_string();
+        return enter_chat_mode(app, &agent_name).await;
+    }
+    if input == "chat" {
+        if let Some(agent) = app.overview.agents.first() {
+            let name = agent.name.clone();
+            return enter_chat_mode(app, &name).await;
+        } else {
             app.log(
-                EntryTone::Warning,
-                "not sure",
-                vec![
-                    "I couldn't map that to a strong command guess.".to_string(),
-                    "Try `/help`, or start with `/health`, `/status`, `/agents`, `/doctor`, or `/top`."
-                        .to_string(),
-                ],
+                Tone::Warning,
+                "chat",
+                vec!["No agents found. Create one first.".to_string()],
             );
             return Ok(None);
         }
-    };
-
-    if guessed {
-        app.log(
-            EntryTone::System,
-            "interpreted",
-            vec![format!("Treating that as `/{}`.", command.name)],
-        );
     }
 
-    execute_command(app, command).await
-}
-
-async fn execute_command(
-    app: &mut InteractiveApp,
-    command: &'static SlashCommand,
-) -> anyhow::Result<Option<InteractiveExit>> {
-    match command.name {
-        "start" => {
-            let message = start_local_service()?;
-            app.log(EntryTone::Success, "service", vec![message]);
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            app.refresh().await;
-        }
-        "health" => {
-            app.refresh().await;
-            let message = if app.overview.service_running {
-                "Local service is healthy."
-            } else {
-                "Local service is not reachable."
-            };
-            app.log(
-                if app.overview.service_running {
-                    EntryTone::Success
-                } else {
-                    EntryTone::Warning
-                },
-                "health",
-                vec![
-                    message.to_string(),
-                    format!("Endpoint: {}", app.overview.endpoint),
-                ],
-            );
-        }
-        "status" => {
-            app.refresh().await;
-            let tenant_label = app
-                .overview
-                .tenants
-                .first()
-                .map(|t| format!("{} ({})", t.name, t.slug))
-                .unwrap_or_else(|| "not provisioned".to_string());
-            let recommendations = build_recommendations(&app.overview);
-            let mut body = vec![format!(
-                "{}  tenant:{}  agents:{}  creds:{}  backups:{}",
-                if app.overview.service_running {
-                    "online"
-                } else {
-                    "offline"
-                },
-                tenant_label,
-                app.overview.agents.len(),
-                app.overview.credentials.len(),
-                app.overview.backups.len(),
-            )];
-            if let Some(next) = recommendations.first() {
-                body.push(format!("next: {}", next));
-            }
-            app.log(EntryTone::System, "status", body);
-        }
-        "agents" => {
-            app.refresh().await;
-            let body = if app.overview.agents.is_empty() {
-                vec![
-                    "No agents found.".to_string(),
-                    "Create a credential first, then run `hiveloom agent create ...`.".to_string(),
-                ]
-            } else {
-                app.overview
-                    .agents
-                    .iter()
-                    .map(|agent| {
-                        format!("{}  |  {}  |  {}", agent.name, agent.model_id, agent.status)
-                    })
-                    .collect()
-            };
-            app.log(EntryTone::Info, "agents", body);
-        }
-        "credentials" => {
-            app.refresh().await;
-            let body = if app.overview.credentials.is_empty() {
-                vec![
-                    "No credentials stored yet.".to_string(),
-                    "Suggested command: hiveloom credential set anthropic-key --kind static --from-env ANTHROPIC_API_KEY"
-                        .to_string(),
-                ]
-            } else {
-                app.overview
-                    .credentials
-                    .iter()
-                    .map(|cred| format!("{}  |  {}", cred.name, cred.kind))
-                    .collect()
-            };
-            app.log(EntryTone::Info, "credentials", body);
-        }
-        "backups" => {
-            app.refresh().await;
-            let body = if app.overview.backups.is_empty() {
-                vec![
-                    "No backups recorded yet.".to_string(),
-                    "Suggested command: hiveloom backup create --tenant default --output default-backup.tar.gz"
-                        .to_string(),
-                ]
-            } else {
-                app.overview
-                    .backups
-                    .iter()
-                    .map(|b| format!("{}  |  {} bytes", file_label(&b.filename), b.size_bytes))
-                    .collect()
-            };
-            app.log(EntryTone::Info, "backups", body);
-        }
-        "doctor" => {
-            let data_dir = crate::cli::local::default_data_dir();
-            app.log(EntryTone::System, "doctor", run_doctor_summary(&data_dir)?);
-        }
-        "create-agent" => {
-            app.refresh().await;
-            let body = if !app.overview.service_running {
-                vec![
-                    "Start the service first so agent commands can reach the admin API."
-                        .to_string(),
-                    "Use `/start`.".to_string(),
-                ]
-            } else if app.overview.credentials.is_empty() {
-                vec![
-                    "Create a provider credential first.".to_string(),
-                    "Suggested command: hiveloom credential set anthropic-key --kind static --from-env ANTHROPIC_API_KEY"
-                        .to_string(),
-                ]
-            } else {
-                vec![
-                    "Suggested next command:".to_string(),
-                    "hiveloom agent create --name support-bot --model claude-sonnet-4-5-20250514 --system-prompt \"You are a helpful assistant.\" --scope-mode dual"
-                        .to_string(),
-                    format!("Using credential already present: {}", app.overview.credentials[0].name),
-                ]
-            };
-            app.log(EntryTone::Success, "create-agent", body);
-        }
-        "setup" => {
-            app.refresh().await;
-
-            // Step 1: Start service if not running
-            if !app.overview.service_running {
-                app.log(EntryTone::System, "setup [1/3]", vec!["Starting service...".to_string()]);
-                let message = start_local_service()?;
-                app.log(EntryTone::Success, "service", vec![message]);
-                tokio::time::sleep(Duration::from_millis(1500)).await;
-                app.refresh().await;
-                if !app.overview.service_running {
-                    app.log(EntryTone::Warning, "setup", vec![
-                        "Service did not start. Check `hiveloom doctor` or logs.".to_string(),
-                    ]);
-                    return Ok(None);
-                }
-            } else {
-                app.log(EntryTone::Success, "setup [1/3]", vec!["Service already running.".to_string()]);
-            }
-
-            // Step 2: Store API key if no credentials exist
-            if app.overview.credentials.is_empty() {
-                app.log(EntryTone::System, "setup [2/3]", vec![
-                    "No LLM credential found. Paste your API key below.".to_string(),
-                    "The key will be stored encrypted and never logged.".to_string(),
-                    "Supported: Anthropic (sk-ant-...) or OpenAI (sk-...).".to_string(),
-                ]);
-                // We need to leave TUI temporarily to read the key
-                return Ok(Some(InteractiveExit::Run(DeferredAction::SetupCredential)));
-            } else {
-                app.log(EntryTone::Success, "setup [2/3]", vec![
-                    format!("Credential already stored: {}", app.overview.credentials[0].name),
-                ]);
-            }
-
-            // Step 3: Create agent if none exist
-            if app.overview.agents.is_empty() {
-                app.log(EntryTone::System, "setup [3/3]", vec![
-                    "No agents found. Creating your first agent...".to_string(),
-                ]);
-                return Ok(Some(InteractiveExit::Run(DeferredAction::SetupAgent)));
-            } else {
-                app.log(EntryTone::Success, "setup [3/3]", vec![
-                    format!("Agent already exists: {}", app.overview.agents[0].name),
-                ]);
-            }
-
-            app.log(EntryTone::Success, "setup", vec![
-                "All set! Your instance is ready.".to_string(),
-                "Use `/top` for the live dashboard or start chatting via MCP.".to_string(),
-            ]);
-        }
-        "top" => return Ok(Some(InteractiveExit::Run(DeferredAction::Dashboard))),
-        "help" => {
-            let body = COMMANDS
-                .iter()
-                .map(|cmd| format!("/{:<12} {}", cmd.name, cmd.description))
-                .collect::<Vec<_>>();
-            app.log(EntryTone::System, "help", {
-                let mut lines = vec![
-                    "Use full slash commands or plain requests.".to_string(),
-                    "Examples: `/health`, `/status`, `/agents`, `/create-agent`, `/top`"
-                        .to_string(),
-                ];
-                lines.extend(body);
-                lines
-            });
-        }
-        "quit" => return Ok(Some(InteractiveExit::Quit)),
-        _ => {}
-    }
-
+    // CLI command dispatch
+    app.log(Tone::User, ">", vec![input.clone()]);
+    dispatch_cli_command(app, &input).await;
     Ok(None)
 }
 
-fn render_shell(f: &mut ratatui::Frame, app: &InteractiveApp) {
+async fn enter_chat_mode(app: &mut App, agent_name: &str) -> anyhow::Result<Option<ExitAction>> {
+    // Find agent
+    app.refresh().await;
+    let agent = app
+        .overview
+        .agents
+        .iter()
+        .find(|a| a.name.eq_ignore_ascii_case(agent_name));
+    match agent {
+        Some(a) => {
+            let name = a.name.clone();
+            let id = a.id.clone();
+            app.log(
+                Tone::System,
+                "chat",
+                vec![
+                    format!("Chatting with {}. Type /exit or Esc to return.", name),
+                ],
+            );
+            app.mode = AppMode::Chat {
+                agent_name: name,
+                agent_id: id,
+                conversation_id: None,
+            };
+        }
+        None => {
+            app.log(
+                Tone::Warning,
+                "chat",
+                vec![format!("Agent '{}' not found.", agent_name)],
+            );
+        }
+    }
+    Ok(None)
+}
+
+async fn handle_slash_command(
+    app: &mut App,
+    input: &str,
+) -> anyhow::Result<Option<ExitAction>> {
+    let cmd = input.trim_start_matches('/').trim().to_lowercase();
+
+    match cmd.as_str() {
+        "setup" => return Ok(Some(ExitAction::RunSetup)),
+        "exit" | "quit" | "q" => return Ok(Some(ExitAction::Quit)),
+        "clear" => {
+            app.transcript.clear();
+            app.scroll_offset = 0;
+        }
+        "top" | "dashboard" => return Ok(Some(ExitAction::Dashboard)),
+        "help" | "?" => {
+            let mut lines = vec!["Commands (type without hiveloom prefix):".to_string()];
+            for entry in &app.registry {
+                if !entry.path.starts_with('/') {
+                    lines.push(format!("  {:<30} {}", entry.path, entry.description));
+                }
+            }
+            lines.push(String::new());
+            lines.push("Slash commands:".to_string());
+            for entry in &app.registry {
+                if entry.path.starts_with('/') {
+                    lines.push(format!("  {:<30} {}", entry.path, entry.description));
+                }
+            }
+            app.log(Tone::System, "help", lines);
+        }
+        _ => {
+            app.log(
+                Tone::Warning,
+                "unknown",
+                vec![format!("Unknown slash command: /{}", cmd)],
+            );
+        }
+    }
+    Ok(None)
+}
+
+async fn dispatch_cli_command(app: &mut App, input: &str) {
+    // Build synthetic argv and run through the CLI binary as a subprocess
+    let exe = match std::env::current_exe() {
+        Ok(e) => e,
+        Err(e) => {
+            app.log(Tone::Warning, "error", vec![format!("Cannot find executable: {}", e)]);
+            return;
+        }
+    };
+
+    let args: Vec<&str> = input.split_whitespace().collect();
+    if args.is_empty() {
+        return;
+    }
+
+    let result = ProcessCommand::new(&exe)
+        .args(&args)
+        .env(
+            "HIVELOOM_ENDPOINT",
+            &app.overview.endpoint,
+        )
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output();
+
+    match result {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let mut lines: Vec<String> = Vec::new();
+            if !stdout.trim().is_empty() {
+                for line in stdout.lines() {
+                    lines.push(line.to_string());
+                }
+            }
+            if !stderr.trim().is_empty() {
+                for line in stderr.lines() {
+                    lines.push(line.to_string());
+                }
+            }
+            if lines.is_empty() {
+                lines.push("(no output)".to_string());
+            }
+            // Truncate very long output
+            if lines.len() > 100 {
+                lines.truncate(100);
+                lines.push("... (truncated)".to_string());
+            }
+            let tone = if output.status.success() {
+                Tone::Info
+            } else {
+                Tone::Warning
+            };
+            app.log(tone, "result", lines);
+        }
+        Err(e) => {
+            app.log(
+                Tone::Warning,
+                "error",
+                vec![format!("Failed to execute: {}", e)],
+            );
+        }
+    }
+}
+
+// ── TUI rendering ───────────────────────────────────────────────────────
+
+fn render(f: &mut ratatui::Frame, app: &App) {
     let root = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
-            Constraint::Min(8),
-            Constraint::Length(2),
-            Constraint::Length(3),
-            Constraint::Length(1),
+            Constraint::Length(2),  // Title bar
+            Constraint::Min(6),     // Transcript
+            Constraint::Length(if app.suggestions.is_empty() { 0 } else { 2 }), // Suggestions
+            Constraint::Length(3),  // Input
         ])
         .split(f.size());
 
-    render_header(f, root[0], app);
+    render_title(f, root[0], app);
     render_transcript(f, root[1], app);
-    render_suggestions_bar(f, root[2], app);
-    render_composer(f, root[3], app);
-    render_footer(f, root[4]);
+    if !app.suggestions.is_empty() {
+        render_suggestions(f, root[2], app);
+    }
+    render_input(f, root[3], app);
 }
 
-fn render_header(f: &mut ratatui::Frame, area: Rect, app: &InteractiveApp) {
-    let status = if app.overview.service_running {
+fn render_title(f: &mut ratatui::Frame, area: Rect, app: &App) {
+    let status_style = if app.overview.service_running {
+        Style::default().fg(Color::Green)
+    } else {
+        Style::default().fg(Color::Yellow)
+    };
+    let status_text = if app.overview.service_running {
         "online"
     } else {
         "offline"
     };
-    let header = Paragraph::new(Line::from(vec![
+
+    let tenant = app
+        .overview
+        .tenants
+        .first()
+        .map(|t| t.slug.as_str())
+        .unwrap_or("—");
+
+    let mode_info = match &app.mode {
+        AppMode::Command => String::new(),
+        AppMode::Chat { agent_name, .. } => format!("  chatting with {}", agent_name),
+    };
+
+    let line1 = Line::from(vec![
         Span::styled(
-            "hiveloom",
+            " ▸ hiveloom ",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw("  "),
-        Span::styled(
-            status,
-            Style::default().fg(if app.overview.service_running {
-                Color::Green
-            } else {
-                Color::Yellow
-            }),
-        ),
-    ]));
-    f.render_widget(header, area);
+        Span::styled(status_text, status_style),
+        Span::raw(format!(
+            "  tenant:{}  agents:{}  creds:{}",
+            tenant,
+            app.overview.agents.len(),
+            app.overview.credentials.len(),
+        )),
+        Span::styled(mode_info, Style::default().fg(Color::Magenta)),
+    ]);
+
+    let title = Paragraph::new(line1).block(Block::default().borders(Borders::BOTTOM));
+    f.render_widget(title, area);
 }
 
-fn render_transcript(f: &mut ratatui::Frame, area: Rect, app: &InteractiveApp) {
-    let max_lines = area.height as usize;
-    let mut lines = Vec::new();
+fn render_transcript(f: &mut ratatui::Frame, area: Rect, app: &App) {
+    let mut lines: Vec<Line> = Vec::new();
 
     for entry in &app.transcript {
         let label_style = match entry.tone {
-            EntryTone::System => Style::default().fg(Color::Cyan),
-            EntryTone::Success => Style::default().fg(Color::Green),
-            EntryTone::Warning => Style::default().fg(Color::Yellow),
-            EntryTone::Info => Style::default().fg(Color::Blue),
-        }
-        .add_modifier(Modifier::BOLD);
+            Tone::System => Style::default().fg(Color::Cyan),
+            Tone::Success => Style::default().fg(Color::Green),
+            Tone::Warning => Style::default().fg(Color::Yellow),
+            Tone::Info => Style::default().fg(Color::Blue),
+            Tone::User => Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Tone::Agent => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        };
 
-        if let Some(first) = entry.body.first() {
+        if let Some(first) = entry.lines.first() {
             lines.push(Line::from(vec![
-                Span::styled(format!("{} ", entry.title), label_style),
+                Span::styled(format!("{} ", entry.label), label_style),
                 Span::raw(first.clone()),
             ]));
         }
-        for body in entry.body.iter().skip(1) {
-            lines.push(Line::from(vec![Span::raw("  "), Span::raw(body.clone())]));
+        for line in entry.lines.iter().skip(1) {
+            let indent = " ".repeat(entry.label.len() + 1);
+            lines.push(Line::from(vec![
+                Span::raw(indent),
+                Span::raw(line.clone()),
+            ]));
         }
         lines.push(Line::from(""));
     }
 
-    let lines = if lines.len() > max_lines {
-        lines.split_off(lines.len() - max_lines)
+    // Handle scrolling
+    let visible_height = area.height as usize;
+    let total = lines.len();
+    let scroll = if app.should_auto_scroll {
+        total.saturating_sub(visible_height) as u16
     } else {
-        lines
+        let max_scroll = total.saturating_sub(visible_height) as u16;
+        max_scroll.saturating_sub(app.scroll_offset)
     };
 
-    let transcript = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let transcript = Paragraph::new(lines)
+        .wrap(Wrap { trim: false })
+        .scroll((scroll, 0));
     f.render_widget(transcript, area);
 }
 
-fn render_composer(f: &mut ratatui::Frame, area: Rect, app: &InteractiveApp) {
+fn render_suggestions(f: &mut ratatui::Frame, area: Rect, app: &App) {
+    let mut spans = Vec::new();
+    for (pos, &idx) in app.suggestions.iter().take(5).enumerate() {
+        let entry = &app.registry[idx];
+        let style = if pos == app.selected_suggestion {
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Cyan)
+        };
+        if pos > 0 {
+            spans.push(Span::raw("  "));
+        }
+        spans.push(Span::styled(&entry.path, style));
+        spans.push(Span::styled(
+            format!(" {}", truncate_str(&entry.description, 20)),
+            Style::default().fg(Color::DarkGray),
+        ));
+    }
+
+    let suggestions = Paragraph::new(Line::from(spans))
+        .block(Block::default().borders(Borders::TOP));
+    f.render_widget(suggestions, area);
+}
+
+fn render_input(f: &mut ratatui::Frame, area: Rect, app: &App) {
+    let prompt = match &app.mode {
+        AppMode::Command => "> ",
+        AppMode::Chat { .. } => "you: ",
+    };
+    let prompt_style = match &app.mode {
+        AppMode::Command => Style::default().fg(Color::Cyan),
+        AppMode::Chat { .. } => Style::default().fg(Color::Green),
+    };
+
     let content = if app.input.is_empty() {
+        let placeholder = match &app.mode {
+            AppMode::Command => "type a command, /help, or /setup...",
+            AppMode::Chat { .. } => "type a message, /exit to return...",
+        };
         Line::from(vec![
-            Span::styled("> ", Style::default().fg(Color::Cyan)),
-            Span::styled(
-                "try: /health, /status, /agents, /create-agent, /top",
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(prompt, prompt_style),
+            Span::styled(placeholder, Style::default().fg(Color::DarkGray)),
         ])
     } else {
         Line::from(vec![
-            Span::styled("> ", Style::default().fg(Color::Cyan)),
+            Span::styled(prompt, prompt_style),
             Span::raw(app.input.clone()),
         ])
     };
-    let composer = Paragraph::new(content).block(Block::default().borders(Borders::TOP));
-    f.render_widget(composer, area);
-    let cursor_x = area.x + 3 + app.cursor as u16;
+
+    let input = Paragraph::new(content).block(
+        Block::default()
+            .borders(Borders::TOP)
+            .title(" Tab:complete  Enter:run  Esc:back  Ctrl-C:quit ")
+            .title_alignment(Alignment::Right)
+            .title_style(Style::default().fg(Color::DarkGray)),
+    );
+    f.render_widget(input, area);
+
+    let cursor_x = area.x + prompt.len() as u16 + app.cursor as u16;
     let cursor_y = area.y + 1;
     f.set_cursor(cursor_x, cursor_y);
 }
 
-fn render_footer(f: &mut ratatui::Frame, area: Rect) {
-    let footer = Paragraph::new("Tab complete  Enter run  /help commands  Esc clear  Ctrl-C quit")
-        .style(Style::default().fg(Color::DarkGray));
-    f.render_widget(footer, area);
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max.saturating_sub(3)])
+    }
 }
 
-fn render_suggestions_bar(f: &mut ratatui::Frame, area: Rect, app: &InteractiveApp) {
-    let line = if app.input.trim().is_empty() {
-        Line::from(vec![
-            Span::styled("commands ", Style::default().fg(Color::DarkGray)),
-            Span::styled("/health", Style::default().fg(Color::Cyan)),
-            Span::styled(" check service  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("/status", Style::default().fg(Color::Cyan)),
-            Span::styled(" show summary  ", Style::default().fg(Color::DarkGray)),
-            Span::styled("/create-agent", Style::default().fg(Color::Cyan)),
-            Span::styled(" next setup step", Style::default().fg(Color::DarkGray)),
-        ])
-    } else if app.suggestions.is_empty() {
-        Line::from(vec![Span::styled(
-            "No close command match yet. Try `/help` for the full command list.",
-            Style::default().fg(Color::DarkGray),
-        )])
+// ── Setup wizard ────────────────────────────────────────────────────────
+
+async fn run_setup(app: &mut App) -> anyhow::Result<()> {
+    use std::io::Write;
+
+    println!();
+    println!("  === Hiveloom Setup ===");
+    println!();
+
+    // Step 1: Start service
+    app.refresh().await;
+    if !app.overview.service_running {
+        println!("  [1/5] Starting service...");
+        let exe = std::env::current_exe()?;
+        let data_dir = crate::cli::local::default_data_dir();
+        let logs_dir = std::path::PathBuf::from(&data_dir).join("logs");
+        std::fs::create_dir_all(&logs_dir)?;
+        let log_path = logs_dir.join("service.log");
+        let stdout = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?;
+        let stderr = stdout.try_clone()?;
+        let child = ProcessCommand::new(exe)
+            .arg("serve")
+            .env("HIVELOOM_DATA_DIR", &data_dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr))
+            .spawn()?;
+        println!("  Started service (pid {})", child.id());
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        app.refresh().await;
+        if !app.overview.service_running {
+            println!("  Service may still be starting. Waiting...");
+            tokio::time::sleep(Duration::from_millis(2000)).await;
+            app.refresh().await;
+        }
+        if app.overview.service_running {
+            println!("  ✓ Service is running at {}", app.overview.endpoint);
+        } else {
+            println!("  ✗ Service failed to start. Check logs at {}", log_path.display());
+            return Ok(());
+        }
     } else {
-        let mut spans = vec![Span::styled(
-            "suggestions ",
-            Style::default().fg(Color::DarkGray),
-        )];
+        println!("  [1/5] ✓ Service already running at {}", app.overview.endpoint);
+    }
 
-        for (position, idx) in app.suggestions.iter().take(3).enumerate() {
-            let cmd = &COMMANDS[*idx];
-            let style = if position == app.selected_suggestion {
-                Style::default()
-                    .fg(Color::White)
-                    .bg(Color::Rgb(18, 35, 49))
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Cyan)
-            };
-
-            if position > 0 {
-                spans.push(Span::styled("  ", Style::default().fg(Color::DarkGray)));
+    // Step 2: API key
+    app.refresh().await;
+    if app.overview.credentials.is_empty() {
+        println!();
+        println!("  [2/5] Enter your LLM API key:");
+        println!("        Anthropic keys start with sk-ant-...");
+        println!("        OpenAI keys start with sk-...");
+        println!();
+        print!("  API Key: ");
+        io::stdout().flush()?;
+        let mut key = String::new();
+        io::stdin().read_line(&mut key)?;
+        let key = key.trim();
+        if key.is_empty() {
+            println!("  Skipped. You can set it later with: credential set anthropic");
+        } else {
+            let cred_name = if key.starts_with("sk-ant-") { "anthropic" } else { "openai" };
+            let body = serde_json::json!({ "name": cred_name, "kind": "static", "value": key });
+            match app
+                .client
+                .post::<_, serde_json::Value>("/api/tenants/default/credentials", &body)
+                .await
+            {
+                Ok(_) => println!("  ✓ Stored credential '{}'", cred_name),
+                Err(e) => println!("  ✗ Failed: {}", e),
             }
-
-            spans.push(Span::styled(format!("/{}", cmd.name), style));
-            spans.push(Span::styled(
-                format!(" {}", cmd.title),
-                Style::default().fg(Color::DarkGray),
-            ));
         }
-
-        Line::from(spans)
-    };
-
-    let suggestions = Paragraph::new(line).block(Block::default().borders(Borders::TOP));
-    f.render_widget(suggestions, area);
-}
-
-fn autocomplete(app: &mut InteractiveApp) {
-    if let Some(idx) = app.suggestions.first().copied() {
-        let command = &COMMANDS[idx];
-        app.input = format!("/{}", command.name);
-        app.cursor = app.input.len();
-        app.sync_suggestions();
-    }
-}
-
-fn resolve_command(query: &str) -> Option<(&'static SlashCommand, bool)> {
-    let trimmed = query.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if trimmed == "?" {
-        return COMMANDS
-            .iter()
-            .find(|cmd| cmd.name == "help")
-            .map(|cmd| (cmd, false));
-    }
-
-    if let Some(name) = trimmed.strip_prefix('/') {
-        let name = name.trim().to_ascii_lowercase();
-        return COMMANDS
-            .iter()
-            .find(|cmd| cmd.name == name || cmd.aliases.iter().any(|alias| *alias == name))
-            .map(|cmd| (cmd, false));
-    }
-
-    let ranked = ranked_commands(query);
-    let best = ranked.first().copied()?;
-    let score = score_command(query, &COMMANDS[best]);
-    if score >= 60 {
-        Some((&COMMANDS[best], true))
-    } else if query.to_ascii_lowercase().contains("what")
-        || query.to_ascii_lowercase().contains("next")
-    {
-        COMMANDS
-            .iter()
-            .find(|cmd| cmd.name == "status")
-            .map(|cmd| (cmd, true))
     } else {
-        None
-    }
-}
-
-fn ranked_commands(query: &str) -> Vec<usize> {
-    let mut scored: Vec<(usize, i32)> = COMMANDS
-        .iter()
-        .enumerate()
-        .map(|(idx, cmd)| (idx, score_command(query, cmd)))
-        .filter(|(_, score)| *score > 0)
-        .collect();
-
-    scored.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    scored.into_iter().map(|(idx, _)| idx).collect()
-}
-
-fn score_command(query: &str, command: &SlashCommand) -> i32 {
-    let q = query.trim().trim_start_matches('/').to_ascii_lowercase();
-    if q.is_empty() {
-        return 1;
+        println!("  [2/5] ✓ Credential already stored: {}", app.overview.credentials[0].name);
     }
 
-    let title = command.title.to_ascii_lowercase();
-    let desc = command.description.to_ascii_lowercase();
+    // Step 3: Create agent
+    app.refresh().await;
+    if app.overview.agents.is_empty() {
+        println!();
+        print!("  [3/5] Agent name [support-bot]: ");
+        io::stdout().flush()?;
+        let mut name = String::new();
+        io::stdin().read_line(&mut name)?;
+        let name = name.trim();
+        let name = if name.is_empty() { "support-bot" } else { name };
 
-    if command.name == q {
-        return 120;
-    }
-    if command.name.starts_with(&q) {
-        return 110;
-    }
-    if command
-        .aliases
-        .iter()
-        .any(|alias| alias.eq_ignore_ascii_case(&q))
-    {
-        return 105;
-    }
-    if command.aliases.iter().any(|alias| alias.starts_with(&q)) {
-        return 98;
-    }
-    if title.starts_with(&q) {
-        return 92;
-    }
-    if title.contains(&q) {
-        return 84;
-    }
-    if command.aliases.iter().any(|alias| alias.contains(&q)) {
-        return 78;
-    }
-    if desc.contains(&q) {
-        return 62;
-    }
-    if q.contains("next") && command.name == "status" {
-        return 95;
-    }
-    if q.contains("agent") && command.name == "agents" {
-        return 88;
-    }
-    if q.contains("backup") && command.name == "backups" {
-        return 88;
-    }
-    0
-}
+        let model = if app.overview.credentials.iter().any(|c| c.name == "anthropic") {
+            "claude-sonnet-4-20250514"
+        } else {
+            "gpt-4o"
+        };
 
-async fn fetch_overview(client: &ApiClient) -> Overview {
-    let endpoint = crate::cli::local::default_endpoint();
-    let service_running = client
-        .get_raw("/healthz")
-        .await
-        .map(|status| status.is_success())
-        .unwrap_or(false);
+        print!("  System prompt [You are a helpful assistant.]: ");
+        io::stdout().flush()?;
+        let mut prompt = String::new();
+        io::stdin().read_line(&mut prompt)?;
+        let prompt = prompt.trim();
+        let prompt = if prompt.is_empty() { "You are a helpful assistant." } else { prompt };
 
-    let tenants: Vec<TenantSummary> = client.get("/api/tenants").await.unwrap_or_default();
-    let agents: Vec<AgentSummary> = client
-        .get("/api/tenants/default/agents")
-        .await
-        .unwrap_or_default();
-    let credentials: Vec<CredentialSummary> = client
-        .get("/api/tenants/default/credentials")
-        .await
-        .unwrap_or_default();
-    let backups: Vec<BackupSummary> = client.get("/api/backups").await.unwrap_or_default();
-
-    Overview {
-        endpoint,
-        service_running,
-        tenants,
-        agents,
-        credentials,
-        backups,
-    }
-}
-
-fn build_recommendations(overview: &Overview) -> Vec<String> {
-    let mut items = Vec::new();
-
-    if !overview.service_running {
-        items.push("Start the local service with `/start`.".to_string());
-    }
-    if overview.credentials.is_empty() {
-        items.push("Store a provider credential before creating agents.".to_string());
-    }
-    if overview.agents.is_empty() {
-        items.push("Create your first agent with `/create-agent` guidance.".to_string());
+        let body = serde_json::json!({
+            "name": name, "model_id": model,
+            "system_prompt": prompt, "scope_mode": "dual",
+        });
+        match app
+            .client
+            .post::<_, serde_json::Value>("/api/tenants/default/agents", &body)
+            .await
+        {
+            Ok(_) => println!("  ✓ Agent '{}' created with model {}", name, model),
+            Err(e) => println!("  ✗ Failed: {}", e),
+        }
     } else {
-        items.push("Use `/top` for the live dashboard or ask for `show agents`.".to_string());
-    }
-    if overview.backups.is_empty() {
-        items.push("Create a backup once the instance looks good.".to_string());
+        println!("  [3/5] ✓ Agent already exists: {}", app.overview.agents[0].name);
     }
 
-    if items.is_empty() {
-        items.push(
-            "Everything basic is in place. `/top` or `/status` are the best next moves."
-                .to_string(),
-        );
-    }
+    // Step 4: Create MCP identity
+    app.refresh().await;
+    if !app.overview.agents.is_empty() {
+        let agent = &app.overview.agents[0];
+        println!();
+        print!("  [4/5] Create MCP identity? (name) [desktop-user]: ");
+        io::stdout().flush()?;
+        let mut id_name = String::new();
+        io::stdin().read_line(&mut id_name)?;
+        let id_name = id_name.trim();
+        let id_name = if id_name.is_empty() { "desktop-user" } else { id_name };
 
-    items
-}
-
-fn run_doctor_summary(data_dir: &str) -> anyhow::Result<Vec<String>> {
-    let path = Path::new(data_dir);
-    let mut lines = Vec::new();
-    lines.push(format!("Data dir: {}", data_dir));
-    lines.push(if path.exists() {
-        "PASS data directory exists".to_string()
-    } else {
-        "FAIL data directory does not exist".to_string()
-    });
-
-    let key = path.join("master.key");
-    lines.push(if key.exists() {
-        "PASS master.key present".to_string()
-    } else {
-        "WARN master.key missing".to_string()
-    });
-
-    let db = path.join("platform.db");
-    lines.push(if db.exists() {
-        "PASS platform.db present".to_string()
-    } else {
-        "WARN platform.db missing".to_string()
-    });
-
-    let tenants = path.join("tenants");
-    if tenants.exists() {
-        let count = std::fs::read_dir(&tenants)?.filter_map(Result::ok).count();
-        lines.push(format!("PASS tenant stores found: {}", count));
-    } else {
-        lines.push("WARN tenant stores missing".to_string());
-    }
-
-    Ok(lines)
-}
-
-fn start_local_service() -> anyhow::Result<String> {
-    let data_dir = crate::cli::local::default_data_dir();
-    let endpoint = crate::cli::local::default_endpoint();
-    let pid_path = PathBuf::from(&data_dir).join("run").join("service.pid");
-
-    if let Ok(pid) = std::fs::read_to_string(&pid_path) {
-        let pid = pid.trim();
-        if !pid.is_empty() && process_exists(pid) {
-            return Ok(format!(
-                "Service already appears to be running with pid {}.",
-                pid
-            ));
+        let body = serde_json::json!({
+            "name": id_name, "agent_slug": agent.name,
+        });
+        match app
+            .client
+            .post::<_, serde_json::Value>(
+                "/api/tenants/default/mcp-identities",
+                &body,
+            )
+            .await
+        {
+            Ok(resp) => {
+                if let Some(setup_code) = resp.get("setup_code").and_then(|v| v.as_str()) {
+                    println!("  ✓ MCP identity created");
+                    println!();
+                    println!("  MCP URL:     {}/mcp/default/{}", app.overview.endpoint, agent.name);
+                    println!("  Setup code:  {}", setup_code);
+                    println!();
+                    println!("  Add the URL to Claude Desktop or any MCP client.");
+                    println!("  Enter the setup code when prompted.");
+                } else {
+                    println!("  ✓ MCP identity '{}' created", id_name);
+                }
+            }
+            Err(e) => println!("  ✗ Failed: {}", e),
         }
     }
 
-    let exe = std::env::current_exe()?;
-    let logs_dir = PathBuf::from(&data_dir).join("logs");
-    std::fs::create_dir_all(&logs_dir)?;
-    let log_path = logs_dir.join("service.log");
-    let stdout = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)?;
-    let stderr = stdout.try_clone()?;
+    // Step 5: Test chat
+    app.refresh().await;
+    if !app.overview.agents.is_empty() {
+        let agent = &app.overview.agents[0];
+        println!();
+        println!("  [5/5] Test chat with {}:", agent.name);
+        print!("  you: ");
+        io::stdout().flush()?;
+        let mut msg = String::new();
+        io::stdin().read_line(&mut msg)?;
+        let msg = msg.trim();
+        if !msg.is_empty() {
+            let body = serde_json::json!({ "message": msg });
+            match app
+                .client
+                .post::<_, ChatResponse>(
+                    &format!("/api/tenants/default/agents/{}/chat", agent.id),
+                    &body,
+                )
+                .await
+            {
+                Ok(resp) => {
+                    println!("  {}: {}", agent.name, resp.response);
+                    if !resp.capabilities_used.is_empty() {
+                        println!("  [capabilities: {}]", resp.capabilities_used.join(", "));
+                    }
+                }
+                Err(e) => println!("  ✗ Chat failed: {}", e),
+            }
+        }
+    }
 
-    let child = Command::new(exe)
-        .arg("serve")
-        .env("HIVELOOM_DATA_DIR", &data_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
-        .spawn()?;
+    println!();
+    println!("  Setup complete! Returning to interactive shell...");
+    println!();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    app.refresh().await;
+    app.log(
+        Tone::Success,
+        "setup",
+        vec!["Setup complete. Try 'chat' to talk to your agent.".to_string()],
+    );
 
-    Ok(format!(
-        "Started local service in the background (pid {}) at {}. Logs: {}",
-        child.id(),
-        endpoint,
-        log_path.display()
-    ))
-}
-
-fn process_exists(pid: &str) -> bool {
-    Command::new("kill")
-        .arg("-0")
-        .arg(pid)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}
-
-fn file_label(path: &str) -> String {
-    Path::new(path)
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_else(|| path.to_string())
+    Ok(())
 }

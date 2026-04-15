@@ -14,13 +14,14 @@ pub struct Capability {
     pub credential_ref: Option<String>,
     pub input_schema: Option<String>,
     pub output_schema: Option<String>,
+    pub instruction_content: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
 const SELECT_COLS: &str =
     "id, tenant_id, agent_id, name, description, endpoint_url, auth_type, credential_ref, \
-     input_schema, output_schema, created_at, updated_at";
+     input_schema, output_schema, instruction_content, created_at, updated_at";
 
 fn row_to_capability(row: &rusqlite::Row) -> rusqlite::Result<Capability> {
     Ok(Capability {
@@ -34,8 +35,9 @@ fn row_to_capability(row: &rusqlite::Row) -> rusqlite::Result<Capability> {
         credential_ref: row.get(7)?,
         input_schema: row.get(8)?,
         output_schema: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
+        instruction_content: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }
 
@@ -50,6 +52,7 @@ pub struct CreateCapabilityParams<'a> {
     pub credential_ref: Option<&'a str>,
     pub input_schema: Option<&'a str>,
     pub output_schema: Option<&'a str>,
+    pub instruction_content: Option<&'a str>,
 }
 
 /// Parameters for updating an existing capability.
@@ -62,6 +65,7 @@ pub struct UpdateCapabilityParams<'a> {
     pub credential_ref: Option<&'a str>,
     pub input_schema: Option<&'a str>,
     pub output_schema: Option<&'a str>,
+    pub instruction_content: Option<&'a str>,
 }
 
 impl Capability {
@@ -79,13 +83,15 @@ impl Capability {
             credential_ref: p.credential_ref.map(|s| s.to_string()),
             input_schema: p.input_schema.map(|s| s.to_string()),
             output_schema: p.output_schema.map(|s| s.to_string()),
+            instruction_content: p.instruction_content.map(|s| s.to_string()),
             created_at: now.clone(),
             updated_at: now,
         };
         conn.execute(
             "INSERT INTO capabilities (id, tenant_id, agent_id, name, description, endpoint_url,
-             auth_type, credential_ref, input_schema, output_schema, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             auth_type, credential_ref, input_schema, output_schema, instruction_content,
+             created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 cap.id.to_string(),
                 cap.tenant_id.to_string(),
@@ -97,6 +103,7 @@ impl Capability {
                 cap.credential_ref,
                 cap.input_schema,
                 cap.output_schema,
+                cap.instruction_content,
                 cap.created_at,
                 cap.updated_at,
             ],
@@ -140,7 +147,7 @@ impl Capability {
         conn.execute(
             "UPDATE capabilities SET name = ?1, description = ?2, endpoint_url = ?3,
              auth_type = ?4, credential_ref = ?5, input_schema = ?6, output_schema = ?7,
-             updated_at = ?8 WHERE id = ?9",
+             instruction_content = ?8, updated_at = ?9 WHERE id = ?10",
             params![
                 p.name,
                 p.description,
@@ -149,6 +156,7 @@ impl Capability {
                 p.credential_ref,
                 p.input_schema,
                 p.output_schema,
+                p.instruction_content,
                 now,
                 p.id.to_string(),
             ],

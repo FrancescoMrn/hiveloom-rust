@@ -12,6 +12,7 @@ pub mod agents;
 pub mod auth_tokens;
 pub mod backups;
 pub mod capabilities;
+pub mod chat;
 pub mod compaction;
 pub mod credentials;
 pub mod event_subscriptions;
@@ -101,6 +102,11 @@ pub fn router(state: Arc<super::AppState>) -> Router<Arc<super::AppState>> {
         .route(
             "/tenants/:tid/agents/:aid/rollback",
             post(agents::rollback_agent),
+        )
+        // ── Chat (spec 005) ───────────────────────────────────────────
+        .route(
+            "/tenants/:tid/agents/:aid/chat",
+            post(chat::chat_with_agent),
         )
         // ── Capability routes (T042) ────────────────────────────────────
         .route(

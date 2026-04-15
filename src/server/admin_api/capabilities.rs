@@ -17,12 +17,14 @@ pub struct CreateCapabilityRequest {
     pub name: String,
     #[serde(default)]
     pub description: String,
-    pub endpoint_url: String,
+    #[serde(default)]
+    pub endpoint_url: Option<String>,
     #[serde(default = "default_auth_type")]
     pub auth_type: String,
     pub credential_ref: Option<String>,
     pub input_schema: Option<String>,
     pub output_schema: Option<String>,
+    pub instruction_content: Option<String>,
 }
 
 fn default_auth_type() -> String {
@@ -34,12 +36,14 @@ pub struct UpdateCapabilityRequest {
     pub name: String,
     #[serde(default)]
     pub description: String,
-    pub endpoint_url: String,
+    #[serde(default)]
+    pub endpoint_url: Option<String>,
     #[serde(default = "default_auth_type")]
     pub auth_type: String,
     pub credential_ref: Option<String>,
     pub input_schema: Option<String>,
     pub output_schema: Option<String>,
+    pub instruction_content: Option<String>,
 }
 
 pub async fn create_capability(
@@ -60,6 +64,7 @@ pub async fn create_capability(
         Err(e) => return e,
     };
     let conn = tenant_store.conn();
+    let endpoint_url = body.endpoint_url.as_deref().unwrap_or("");
     match Capability::create(
         conn,
         CreateCapabilityParams {
@@ -67,11 +72,12 @@ pub async fn create_capability(
             agent_id: aid,
             name: &body.name,
             description: &body.description,
-            endpoint_url: &body.endpoint_url,
+            endpoint_url,
             auth_type: &body.auth_type,
             credential_ref: body.credential_ref.as_deref(),
             input_schema: body.input_schema.as_deref(),
             output_schema: body.output_schema.as_deref(),
+            instruction_content: body.instruction_content.as_deref(),
         },
     ) {
         Ok(cap) => (
@@ -147,17 +153,19 @@ pub async fn update_capability(
         Err(e) => return e,
     };
     let conn = tenant_store.conn();
+    let endpoint_url = body.endpoint_url.as_deref().unwrap_or("");
     match Capability::update(
         conn,
         UpdateCapabilityParams {
             id: cid,
             name: &body.name,
             description: &body.description,
-            endpoint_url: &body.endpoint_url,
+            endpoint_url,
             auth_type: &body.auth_type,
             credential_ref: body.credential_ref.as_deref(),
             input_schema: body.input_schema.as_deref(),
             output_schema: body.output_schema.as_deref(),
+            instruction_content: body.instruction_content.as_deref(),
         },
     ) {
         Ok(()) => match Capability::get(conn, cid) {

@@ -3,6 +3,7 @@ pub mod apply;
 pub mod auth;
 pub mod backup;
 pub mod capability;
+pub mod chat;
 pub mod client;
 pub mod compaction_log;
 pub mod credential;
@@ -71,6 +72,8 @@ pub enum Command {
     Backup(backup::BackupArgs),
     /// View compaction event log
     CompactionLog(compaction_log::CompactionLogArgs),
+    /// Chat with an agent
+    Chat(chat::ChatArgs),
     /// Interactive mode / first-run wizard
     Interactive,
 }
@@ -101,6 +104,7 @@ pub async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         }
         Command::Backup(args) => backup::run(args).await,
         Command::CompactionLog(args) => compaction_log::run(args).await,
+        Command::Chat(args) => chat::run(args).await,
         Command::Interactive => interactive::run().await,
     }
 }

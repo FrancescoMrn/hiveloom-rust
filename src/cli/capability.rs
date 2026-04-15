@@ -37,15 +37,18 @@ pub enum CapabilityCommand {
         /// Description
         #[arg(long)]
         description: String,
-        /// Endpoint URL the capability calls
+        /// Endpoint URL the capability calls (required for HTTP capabilities, omit for --from-file)
         #[arg(long)]
-        cap_endpoint: String,
-        /// Auth type (none | api_key | oauth)
+        cap_endpoint: Option<String>,
+        /// Auth type (none | api_key | oauth | markdown)
         #[arg(long, default_value = "none")]
         auth_type: String,
         /// Credential reference name
         #[arg(long)]
         credential_ref: Option<String>,
+        /// Load capability as a markdown skill from a file
+        #[arg(long)]
+        from_file: Option<String>,
     },
     /// List capabilities for an agent
     List {
@@ -114,14 +117,34 @@ pub async fn run(args: CapabilityArgs) -> anyhow::Result<()> {
             cap_endpoint,
             auth_type,
             credential_ref,
+            from_file,
         } => {
-            let body = serde_json::json!({
-                "name": name,
-                "description": description,
-                "endpoint_url": cap_endpoint,
-                "auth_type": auth_type,
-                "credential_ref": credential_ref,
-            });
+            let body = if let Some(ref path) = from_file {
+                let content = std::fs::read_to_string(path)
+                    .map_err(|e| anyhow::anyhow!("Failed to read file '{}': {}", path, e))?;
+                let size = content.len();
+                let body = serde_json::json!({
+                    "name": name,
+                    "description": description,
+                    "auth_type": "markdown",
+                    "instruction_content": content,
+                });
+                if !json_out {
+                    eprintln!("Reading {} ({} bytes)...", path, size);
+                }
+                body
+            } else {
+                let endpoint = cap_endpoint
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("--cap-endpoint is required for HTTP capabilities (or use --from-file for markdown skills)"))?;
+                serde_json::json!({
+                    "name": name,
+                    "description": description,
+                    "endpoint_url": endpoint,
+                    "auth_type": auth_type,
+                    "credential_ref": credential_ref,
+                })
+            };
             let cap: CapabilityResponse = client
                 .post(
                     &format!("/api/tenants/{tid}/agents/{agent}/capabilities"),
@@ -130,6 +153,8 @@ pub async fn run(args: CapabilityArgs) -> anyhow::Result<()> {
                 .await?;
             if json_out {
                 println!("{}", serde_json::to_string_pretty(&cap)?);
+            } else if from_file.is_some() {
+                println!("Added markdown skill '{}' ({})", cap.name, cap.id);
             } else {
                 println!("Added capability '{}' ({})", cap.name, cap.id);
             }
