@@ -316,6 +316,13 @@ pub async fn authorize_submit(
             return render_authorize_html(&form_params, Some("Internal error")).into_response();
         }
 
+        // Remove any existing registration for this client_id (re-authorization).
+        // The client_id column has a UNIQUE constraint, so we must delete the
+        // old registration before creating a new one with the fresh auth code.
+        if let Ok(Some(existing)) = McpClientRegistration::get_by_client_id(conn, &submission.client_id) {
+            let _ = McpClientRegistration::delete(conn, existing.id);
+        }
+
         // Generate an authorization code
         let auth_code = oauth_server::generate_token();
         let auth_code_hash = oauth_server::hash_token(&auth_code);
