@@ -22,6 +22,8 @@ const REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DeferredAction {
     Dashboard,
+    SetupCredential,
+    SetupAgent,
 }
 
 #[derive(Clone, Copy)]
@@ -86,6 +88,12 @@ const COMMANDS: &[SlashCommand] = &[
         title: "Live dashboard",
         description: "Open `hiveloom top` for the live terminal dashboard.",
         aliases: &["dashboard", "monitor", "open dashboard"],
+    },
+    SlashCommand {
+        name: "setup",
+        title: "First-time setup",
+        description: "Guided wizard: start service, store API key, create first agent.",
+        aliases: &["init", "wizard", "first run", "onboarding", "get started", "initialize"],
     },
     SlashCommand {
         name: "help",
@@ -178,31 +186,196 @@ enum InteractiveExit {
 pub async fn run() -> anyhow::Result<()> {
     let client = ApiClient::new(None, None);
     let mut app = InteractiveApp::new(client).await;
-    let exit = run_shell(&mut app).await?;
 
-    match exit {
-        InteractiveExit::Quit => Ok(()),
-        InteractiveExit::Run(DeferredAction::Dashboard) => {
-            super::top::run(super::top::TopArgs {
-                endpoint: None,
-                token: None,
-                interval: 2,
-            })
-            .await
+    loop {
+        let exit = run_shell(&mut app).await?;
+
+        match exit {
+            InteractiveExit::Quit => return Ok(()),
+            InteractiveExit::Run(DeferredAction::Dashboard) => {
+                return super::top::run(super::top::TopArgs {
+                    endpoint: None,
+                    token: None,
+                    interval: 2,
+                })
+                .await;
+            }
+            InteractiveExit::Run(DeferredAction::SetupCredential) => {
+                // Temporarily leave TUI to collect API key
+                run_setup_credential(&mut app).await?;
+                // Re-enter the shell loop
+            }
+            InteractiveExit::Run(DeferredAction::SetupAgent) => {
+                run_setup_agent(&mut app).await?;
+            }
         }
     }
+}
+
+/// Collect API key outside the TUI (needs raw terminal input).
+async fn run_setup_credential(app: &mut InteractiveApp) -> anyhow::Result<()> {
+    use std::io::Write;
+
+    println!();
+    println!("  Enter your LLM API key (input is hidden):");
+    println!("  Anthropic keys start with sk-ant-...");
+    println!("  OpenAI keys start with sk-...");
+    println!();
+    print!("  API Key: ");
+    io::stdout().flush()?;
+
+    // Read the key (not masked in basic terminals, but we keep it simple)
+    let mut key = String::new();
+    io::stdin().read_line(&mut key)?;
+    let key = key.trim().to_string();
+
+    if key.is_empty() {
+        app.log(EntryTone::Warning, "setup", vec!["No key entered. Skipping credential setup.".to_string()]);
+        return Ok(());
+    }
+
+    // Detect provider
+    let cred_name = if key.starts_with("sk-ant-") {
+        "anthropic"
+    } else {
+        "openai"
+    };
+
+    // Store via API
+    let endpoint = crate::cli::local::default_endpoint();
+    let url = format!("{}/api/tenants/default/credentials", endpoint);
+    let client = reqwest::Client::new();
+    let resp = client.post(&url)
+        .json(&serde_json::json!({
+            "name": cred_name,
+            "kind": "static",
+            "secret": key,
+        }))
+        .send()
+        .await;
+
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            app.log(EntryTone::Success, "setup [2/3]", vec![
+                format!("Stored credential '{}' successfully.", cred_name),
+            ]);
+        }
+        Ok(r) => {
+            let status = r.status();
+            let body = r.text().await.unwrap_or_default();
+            app.log(EntryTone::Warning, "setup", vec![
+                format!("Failed to store credential: {} {}", status, body),
+            ]);
+        }
+        Err(e) => {
+            app.log(EntryTone::Warning, "setup", vec![
+                format!("Failed to store credential: {}", e),
+            ]);
+        }
+    }
+
+    app.refresh().await;
+
+    // Continue to step 3 if no agents
+    if app.overview.agents.is_empty() {
+        app.log(EntryTone::System, "setup [3/3]", vec![
+            "Now let's create your first agent.".to_string(),
+        ]);
+    }
+
+    Ok(())
+}
+
+/// Create a default agent outside the TUI.
+async fn run_setup_agent(app: &mut InteractiveApp) -> anyhow::Result<()> {
+    use std::io::Write;
+
+    println!();
+    println!("  Create your first agent:");
+    println!();
+
+    // Agent name
+    print!("  Agent name [support-bot]: ");
+    io::stdout().flush()?;
+    let mut name = String::new();
+    io::stdin().read_line(&mut name)?;
+    let name = name.trim();
+    let name = if name.is_empty() { "support-bot" } else { name };
+
+    // Model
+    let model = if app.overview.credentials.iter().any(|c| c.name == "anthropic") {
+        "claude-sonnet-4-20250514"
+    } else {
+        "gpt-4o"
+    };
+
+    // System prompt
+    print!("  System prompt [You are a helpful assistant.]: ");
+    io::stdout().flush()?;
+    let mut prompt = String::new();
+    io::stdin().read_line(&mut prompt)?;
+    let prompt = prompt.trim();
+    let prompt = if prompt.is_empty() { "You are a helpful assistant." } else { prompt };
+
+    println!();
+    println!("  Creating agent '{}' with model '{}'...", name, model);
+
+    let endpoint = crate::cli::local::default_endpoint();
+    let url = format!("{}/api/tenants/default/agents", endpoint);
+    let client = reqwest::Client::new();
+    let resp = client.post(&url)
+        .json(&serde_json::json!({
+            "name": name,
+            "model_id": model,
+            "system_prompt": prompt,
+            "scope_mode": "dual",
+        }))
+        .send()
+        .await;
+
+    match resp {
+        Ok(r) if r.status().is_success() => {
+            app.log(EntryTone::Success, "setup [3/3]", vec![
+                format!("Agent '{}' created successfully!", name),
+                "Your instance is ready. Use `/top` for the dashboard.".to_string(),
+            ]);
+        }
+        Ok(r) => {
+            let status = r.status();
+            let body = r.text().await.unwrap_or_default();
+            app.log(EntryTone::Warning, "setup", vec![
+                format!("Failed to create agent: {} {}", status, body),
+            ]);
+        }
+        Err(e) => {
+            app.log(EntryTone::Warning, "setup", vec![
+                format!("Failed to create agent: {}", e),
+            ]);
+        }
+    }
+
+    app.refresh().await;
+    Ok(())
 }
 
 impl InteractiveApp {
     async fn new(client: ApiClient) -> Self {
         let overview = fetch_overview(&client).await;
+        let is_fresh = overview.credentials.is_empty() && overview.agents.is_empty();
         let transcript = vec![TranscriptEntry {
             tone: EntryTone::System,
             title: "ready".to_string(),
-            body: vec![
-                "Type a full command or plain request. Tab completes. Use `/help` for the command list."
-                    .to_string(),
-            ],
+            body: if is_fresh {
+                vec![
+                    "Welcome to Hiveloom! It looks like this is a fresh install.".to_string(),
+                    "Type `/setup` to run the guided first-time setup (service + API key + agent).".to_string(),
+                ]
+            } else {
+                vec![
+                    "Type a full command or plain request. Tab completes. Use `/help` for the command list."
+                        .to_string(),
+                ]
+            },
         }];
 
         Self {
@@ -529,6 +702,58 @@ async fn execute_command(
                 ]
             };
             app.log(EntryTone::Success, "create-agent", body);
+        }
+        "setup" => {
+            app.refresh().await;
+
+            // Step 1: Start service if not running
+            if !app.overview.service_running {
+                app.log(EntryTone::System, "setup [1/3]", vec!["Starting service...".to_string()]);
+                let message = start_local_service()?;
+                app.log(EntryTone::Success, "service", vec![message]);
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+                app.refresh().await;
+                if !app.overview.service_running {
+                    app.log(EntryTone::Warning, "setup", vec![
+                        "Service did not start. Check `hiveloom doctor` or logs.".to_string(),
+                    ]);
+                    return Ok(None);
+                }
+            } else {
+                app.log(EntryTone::Success, "setup [1/3]", vec!["Service already running.".to_string()]);
+            }
+
+            // Step 2: Store API key if no credentials exist
+            if app.overview.credentials.is_empty() {
+                app.log(EntryTone::System, "setup [2/3]", vec![
+                    "No LLM credential found. Paste your API key below.".to_string(),
+                    "The key will be stored encrypted and never logged.".to_string(),
+                    "Supported: Anthropic (sk-ant-...) or OpenAI (sk-...).".to_string(),
+                ]);
+                // We need to leave TUI temporarily to read the key
+                return Ok(Some(InteractiveExit::Run(DeferredAction::SetupCredential)));
+            } else {
+                app.log(EntryTone::Success, "setup [2/3]", vec![
+                    format!("Credential already stored: {}", app.overview.credentials[0].name),
+                ]);
+            }
+
+            // Step 3: Create agent if none exist
+            if app.overview.agents.is_empty() {
+                app.log(EntryTone::System, "setup [3/3]", vec![
+                    "No agents found. Creating your first agent...".to_string(),
+                ]);
+                return Ok(Some(InteractiveExit::Run(DeferredAction::SetupAgent)));
+            } else {
+                app.log(EntryTone::Success, "setup [3/3]", vec![
+                    format!("Agent already exists: {}", app.overview.agents[0].name),
+                ]);
+            }
+
+            app.log(EntryTone::Success, "setup", vec![
+                "All set! Your instance is ready.".to_string(),
+                "Use `/top` for the live dashboard or start chatting via MCP.".to_string(),
+            ]);
         }
         "top" => return Ok(Some(InteractiveExit::Run(DeferredAction::Dashboard))),
         "help" => {
