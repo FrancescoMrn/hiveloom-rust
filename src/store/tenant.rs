@@ -369,7 +369,33 @@ const TENANT_MIGRATIONS: &[(&str, &str)] = &[
     ),
     (
         "0023_add_instruction_content_to_capabilities",
-        "ALTER TABLE capabilities ADD COLUMN instruction_content TEXT;",
+        // Add instruction_content column AND relax auth_type CHECK to include 'markdown'.
+        // SQLite doesn't support ALTER CHECK, so we recreate the table.
+        r#"
+        CREATE TABLE capabilities_new (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            endpoint_url TEXT NOT NULL DEFAULT '',
+            auth_type TEXT NOT NULL DEFAULT 'none' CHECK(auth_type IN ('none','api_key','oauth','markdown')),
+            credential_ref TEXT,
+            input_schema TEXT,
+            output_schema TEXT,
+            instruction_content TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(tenant_id, agent_id, name)
+        );
+        INSERT INTO capabilities_new (id, tenant_id, agent_id, name, description, endpoint_url,
+            auth_type, credential_ref, input_schema, output_schema, created_at, updated_at)
+            SELECT id, tenant_id, agent_id, name, description, endpoint_url,
+            auth_type, credential_ref, input_schema, output_schema, created_at, updated_at
+            FROM capabilities;
+        DROP TABLE capabilities;
+        ALTER TABLE capabilities_new RENAME TO capabilities;
+        "#,
     ),
 ];
 

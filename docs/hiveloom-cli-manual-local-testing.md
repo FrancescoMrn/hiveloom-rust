@@ -1,21 +1,7 @@
 # HiveLoom CLI — Manual Local Testing
 
-This guide walks through a real local operator flow using the repo-local
-`.hiveloom` directory, and it also shows how to expose an agent over MCP for
-use from outside the VPS.
-
----
-
-## Important current behavior
-
-- There is currently no first-class `hiveloom chat` or `hiveloom agent chat`
-  command. After you create an agent, you interact with it through a bound
-  surface (Slack) or through the MCP HTTP surface.
-- The current MCP implementation is an **authenticated MCP tool surface**:
-  `initialize`, `tools/list`, and `tools/call`.
-- It is **not yet** a generic "chat with the agent over MCP" transport.
-  A future `hiveloom agent chat <agent>` command would let you talk to an
-  agent directly from the CLI.
+This guide walks through a real local operator flow: install, configure, create
+an agent, chat with it, and expose it over MCP for external clients.
 
 ---
 
@@ -23,394 +9,383 @@ use from outside the VPS.
 
 | Item              | Value                                       |
 |-------------------|---------------------------------------------|
-| Binary            | `./hiveloom/target/debug/hiveloom`          |
+| Binary            | `./target/release/hiveloom`                 |
 | Local data dir    | `./.hiveloom` (auto-detected from cwd)      |
 | Default endpoint  | `http://127.0.0.1:3000`                     |
-| Install URL       | `https://get.hiveloom.cloud`                |
 
 If `.hiveloom` exists in the current working directory, the CLI uses it
-automatically for local testing.
+automatically for local testing. You can also set `HIVELOOM_DATA_DIR` explicitly.
 
 ---
 
-## 0. Setup Rust
-
-```bash
-rustup toolchain install 1.94.0
-rustup override set 1.94.0
-cargo --version
-```
-
-## 1. Build
+## 0. Build
 
 ```bash
 cd /root/github/hiveloom-app/hiveloom
-cargo build
+cargo build --release
 ```
 
-## 2. Start the local service
+## 1. Quick start with interactive mode
 
-From the repo root:
+The fastest way to get going — the interactive shell guides you through setup:
 
 ```bash
-cd /root/github/hiveloom-app
-./hiveloom/target/debug/hiveloom serve
+./target/release/hiveloom
 ```
 
-Expected behavior:
+On a fresh install, it detects no credentials/agents and prompts:
 
-- `.hiveloom/config.json` is created
-- `.hiveloom/run/service.json` and `.hiveloom/run/service.pid` are created
-- `.hiveloom/master.key` is created (AES-256-GCM key, 0600 permissions)
-- `.hiveloom/platform.db` is created (SQLite, WAL mode)
-- The default tenant is auto-provisioned (FR-032)
+```
+Welcome! This looks like a fresh install.
+Type /setup to get started, or /help for all commands.
+```
+
+Type `/setup` and follow the 5-step wizard:
+
+1. **Start service** — starts `hiveloom serve` in the background
+2. **Enter API key** — paste your Anthropic (`sk-ant-...`) or OpenAI key
+3. **Create agent** — name, model, and system prompt
+4. **MCP identity** — creates identity and displays the MCP URL + setup code
+5. **Test chat** — sends a message and shows the agent's response
+
+After setup, you can chat directly in the interactive shell:
+
+```
+> chat support-bot
+you: Hello!
+support-bot: Hi! How can I help you today?
+```
+
+---
+
+## 2. Manual setup (non-interactive)
+
+### Start the service
+
+```bash
+./target/release/hiveloom serve --host 127.0.0.1 --port 3000
+```
 
 In another terminal:
 
 ```bash
-cd /root/github/hiveloom-app
-./hiveloom/target/debug/hiveloom health
-./hiveloom/target/debug/hiveloom status
-./hiveloom/target/debug/hiveloom tenant list --json
+./target/release/hiveloom health
+./target/release/hiveloom status
+./target/release/hiveloom tenant list --json
 ```
 
-## 3. Seed a local test agent
+### Store credentials
+
+Secrets are never passed as CLI arguments. Use one of:
 
 ```bash
-cd /root/github/hiveloom-app
+# From environment variable
+export ANTHROPIC_API_KEY='sk-ant-...'
+./target/release/hiveloom credential set anthropic --from-env ANTHROPIC_API_KEY
 
-export ANTHROPIC_API_KEY='your-real-or-test-key'
+# From file
+./target/release/hiveloom credential set anthropic --from-file /path/to/key
 
-./hiveloom/target/debug/hiveloom credential set anthropic-key \
-  --kind static \
-  --from-env ANTHROPIC_API_KEY
+# From stdin
+echo 'sk-ant-...' | ./target/release/hiveloom credential set anthropic
+```
 
-./hiveloom/target/debug/hiveloom agent create \
+### Create an agent
+
+```bash
+./target/release/hiveloom agent create \
   --name support-bot \
-  --model claude-sonnet-4-5-20250514 \
-  --system-prompt "You are a helpful support assistant for local testing." \
+  --model claude-sonnet-4-20250514 \
+  --system-prompt "You are a helpful support assistant." \
   --scope-mode dual
+```
 
-./hiveloom/target/debug/hiveloom capability add support-bot \
-  --name search-kb \
-  --description "Search the local knowledge base" \
-  --cap-endpoint "https://kb.example.test/search" \
-  --auth-type api_key \
-  --credential-ref anthropic-key
+### Add capabilities
+
+HTTP endpoint capability:
+
+```bash
+./target/release/hiveloom capability add support-bot \
+  --name echo-httpbin \
+  --description "Echo request payload for testing" \
+  --cap-endpoint https://httpbin.org/anything \
+  --auth-type none
+```
+
+Markdown skill (knowledge injected into system prompt):
+
+```bash
+./target/release/hiveloom capability add support-bot \
+  --name product-faq \
+  --description "Product FAQ knowledge" \
+  --from-file skills/product-faq.md
 ```
 
 Verify:
 
 ```bash
-./hiveloom/target/debug/hiveloom agent list --json
-./hiveloom/target/debug/hiveloom credential list --json
-./hiveloom/target/debug/hiveloom capability list support-bot --json
-./hiveloom/target/debug/hiveloom agent show support-bot
+./target/release/hiveloom agent list
+./target/release/hiveloom credential list
+./target/release/hiveloom capability list support-bot
 ```
-
-## 3a. How to interact with the agent you just created
-
-Today there are two practical paths:
-
-1. **Slack surface**: bind the agent to Slack and talk to it from Slack.
-2. **MCP surface**: expose the agent over `/mcp/<tenant>/<agent>` and invoke
-   it from an MCP client or from `curl`.
-
-There is not yet a direct CLI chat session for an agent.
 
 ---
 
-## 3b. MCP quick recipe (local or remote)
+## 3. Chat with the agent
 
-If your goal is "make this agent reachable over MCP", follow these steps.
-
-### Step 1 — Start Hiveloom on the VPS
-
-For local-only testing:
+### CLI chat command
 
 ```bash
-./hiveloom/target/debug/hiveloom serve
+./target/release/hiveloom chat support-bot
 ```
 
-For remote access (bind to all interfaces):
+This starts a stdin/stdout conversation loop. Type messages, see responses.
+Maintains conversation context across messages. Ctrl-C or `/exit` to quit.
 
-```bash
-./hiveloom/target/debug/hiveloom serve --host 0.0.0.0 --port 3000
+### Interactive shell chat
+
+From inside `hiveloom` interactive mode:
+
+```
+> chat support-bot
+Chatting with support-bot. Type /exit or Esc to return.
+you: What can you help me with?
+support-bot: I can help you with...
 ```
 
-### Step 2 — Put HTTPS in front (remote only)
+---
 
-Put Nginx or Caddy in front and point a public hostname at the VPS, for
-example `https://loom.example.com`. See section 5c below for config examples.
+## 4. MCP setup (for Claude Desktop, Cursor, etc.)
 
-### Step 3 — Create an MCP identity
+### Create MCP identity
 
 ```bash
-./hiveloom/target/debug/hiveloom mcp-identity create \
+./target/release/hiveloom mcp-identity create \
   --tenant default \
-  --name my-laptop
+  --name my-desktop \
+  --agent support-bot
 ```
 
-This prints the MCP identity ID.
-
-### Step 4 — Get a setup code
+### Get a setup code
 
 ```bash
-./hiveloom/target/debug/hiveloom mcp-identity reissue-setup-code \
-  <mcp-identity-id> \
+./target/release/hiveloom mcp-identity reissue-setup-code <identity-id> \
   --tenant default
 ```
 
-This prints a one-time setup code and its expiry.
+This prints a one-time setup code (valid 24 hours).
 
-### Step 5 — Exchange setup code for tokens
+### Connect from Claude Desktop
 
-From your laptop or external client:
+1. Add the MCP server URL to Claude Desktop:
+   ```
+   http://127.0.0.1:3000/mcp/default/support-bot
+   ```
+2. Claude Desktop will discover the OAuth endpoints automatically
+3. Enter the setup code when prompted in the browser
+4. Once authorized, Claude Desktop connects and shows three tools:
+   - **chat** — send messages to the agent
+   - **memory** — search stored memories
+   - **list_conversations** — list prior conversations
+
+### Manual MCP flow with curl
+
+Verify OAuth discovery:
 
 ```bash
-# Exchange setup code for an authorization code
-curl -sS -X POST https://loom.example.com/mcp/authorize \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "setup_code": "<setup-code>",
-    "tenant_slug": "default",
-    "client_id": "manual-test-client"
-  }' | jq
+curl -s http://127.0.0.1:3000/.well-known/oauth-authorization-server | jq
+curl -s http://127.0.0.1:3000/mcp/default/support-bot/.well-known/oauth-protected-resource | jq
+```
 
-# Exchange authorization code for access + refresh tokens
-curl -sS -X POST https://loom.example.com/mcp/token \
+Register a client:
+
+```bash
+curl -s -X POST http://127.0.0.1:3000/oauth/register \
   -H 'Content-Type: application/json' \
   -d '{
-    "grant_type": "authorization_code",
-    "code": "<authorization-code>",
-    "client_id": "manual-test-client"
+    "client_name": "curl-test",
+    "redirect_uris": ["http://127.0.0.1:9999/callback"],
+    "grant_types": ["authorization_code", "refresh_token"],
+    "response_types": ["code"],
+    "token_endpoint_auth_method": "client_secret_post"
   }' | jq
 ```
 
-### Step 6 — Use the bearer token against your agent
+Authorize (submit setup code — in practice, this happens in a browser):
 
 ```bash
-# Initialize the MCP session
-curl -sS -X POST https://loom.example.com/mcp/default/support-bot \
-  -H "Authorization: Bearer <access-token>" \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | jq
-
-# List tools
-curl -sS -X POST https://loom.example.com/mcp/default/support-bot \
-  -H "Authorization: Bearer <access-token>" \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | jq
-
-# Call a tool
-curl -sS -X POST https://loom.example.com/mcp/default/support-bot \
-  -H "Authorization: Bearer <access-token>" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "jsonrpc":"2.0","id":3,"method":"tools/call",
-    "params":{"name":"search-kb","arguments":{"query":"test"}}
-  }' | jq
+curl -s -X POST http://127.0.0.1:3000/oauth/authorize \
+  -d "response_type=code&client_id=<client_id>&redirect_uri=http%3A%2F%2F127.0.0.1%3A9999%2Fcallback&state=test&code_challenge=<challenge>&code_challenge_method=S256&scope=mcp&setup_code=<code>" \
+  -D -
 ```
 
-If you only want to confirm the exposure is working, `tools/list` is the best
-first check because it does not call any external endpoint.
+Exchange authorization code for tokens:
+
+```bash
+curl -s -X POST http://127.0.0.1:3000/oauth/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d "grant_type=authorization_code&code=<auth_code>&redirect_uri=http%3A%2F%2F127.0.0.1%3A9999%2Fcallback&client_id=<client_id>&client_secret=<client_secret>&code_verifier=<verifier>" | jq
+```
+
+Use the bearer token:
+
+```bash
+# Initialize
+curl -s -X POST http://127.0.0.1:3000/mcp/default/support-bot \
+  -H "Authorization: Bearer <access_token>" \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | jq
+
+# List tools (returns: chat, memory, list_conversations)
+curl -s -X POST http://127.0.0.1:3000/mcp/default/support-bot \
+  -H "Authorization: Bearer <access_token>" \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | jq
+
+# Chat with the agent (returns SSE stream)
+curl -s -X POST http://127.0.0.1:3000/mcp/default/support-bot \
+  -H "Authorization: Bearer <access_token>" \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"chat","arguments":{"message":"Hello!"}}}'
+
+# Search memory
+curl -s -X POST http://127.0.0.1:3000/mcp/default/support-bot \
+  -H "Authorization: Bearer <access_token>" \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memory","arguments":{"query":"preferences"}}}' | jq
+```
 
 ---
 
-## 4. Interactive mode
+## 5. Interactive mode
 
 The interactive CLI is launched by running `hiveloom` with no subcommand:
 
 ```bash
-cd /root/github/hiveloom-app
-./hiveloom/target/debug/hiveloom
+./target/release/hiveloom
 ```
 
-This opens a ratatui-based TUI shell with:
+### All CLI commands work inside interactive mode
 
-- A transcript pane showing command output
-- A composer bar with Tab-completion for slash commands
-- A suggestions strip showing ranked matches as you type
+Type any command without the `hiveloom` prefix:
 
-### Available interactive commands
+```
+> agent list
+> credential list
+> capability list support-bot
+> mcp-identity list --tenant default
+> health
+> status
+```
 
-| Command          | Description                                                     |
-|------------------|-----------------------------------------------------------------|
-| `/start`         | Launch the local Hiveloom service in the background             |
-| `/health`        | Check whether the local instance responds on `/healthz`         |
-| `/status`        | Summarize tenants, agents, credentials, backups, endpoint state |
-| `/agents`        | List the current agents in the default tenant                   |
-| `/credentials`   | List stored provider credentials (names only, never values)     |
-| `/backups`       | List backup archives recorded for the local instance            |
-| `/doctor`        | Run local filesystem and store checks against the data dir      |
-| `/create-agent`  | Show the next recommended agent command based on current setup  |
-| `/top`           | Open `hiveloom top` for the live terminal dashboard             |
-| `/help`          | Show command examples and launcher shortcuts                    |
-| `/quit`          | Leave the interactive CLI                                       |
+### Slash commands (interactive-only)
 
-### How input resolution works
-
-- Typing `/health` executes the health command directly.
-- Typing `sta` and pressing Tab completes to `/start` (or `/status` — use
-  Up/Down to select from the suggestions strip).
-- Typing a plain-text phrase like "show agents" is fuzzy-matched to the
-  closest command (in this case `/agents`).
-- If the match is uncertain, the shell says "interpreted as /agents" so you
-  know what ran.
-- There are **no single-letter shortcuts**. Every command uses its full name.
+| Command    | Description                              |
+|------------|------------------------------------------|
+| `/setup`   | Guided first-time setup wizard           |
+| `/help`    | Show all commands                        |
+| `/clear`   | Clear transcript                         |
+| `/exit`    | Exit chat mode or quit                   |
+| `/top`     | Open live dashboard                      |
 
 ### Key bindings
 
 | Key       | Action                              |
 |-----------|-------------------------------------|
-| Tab       | Autocomplete to the top suggestion  |
-| Up/Down   | Cycle through suggestions           |
-| Enter     | Execute the current input           |
-| Esc       | Clear input, or quit if empty       |
+| Tab       | Autocomplete to selected suggestion |
+| Up/Down   | Navigate suggestions / command history |
+| PageUp/Dn | Scroll transcript                   |
+| Enter     | Execute command / send chat message |
+| Esc       | Exit chat mode, or clear input, or quit |
 | Ctrl-C    | Quit                                |
 | Ctrl-L    | Clear transcript                    |
 
 ---
 
-## 5. Test scheduling
+## 6. Markdown skills
 
-Standard 5-field cron is accepted:
+Agents can have markdown-based knowledge files that enrich their system prompt:
 
 ```bash
-./hiveloom/target/debug/hiveloom schedule create support-bot \
+cat > skills/support-runbook.md << 'EOF'
+# Support Runbook
+
+## Password Reset
+1. Verify customer identity
+2. Send password reset link
+3. Confirm reset within 15 minutes
+
+## Pricing
+- Starter: $29/mo
+- Pro: $99/mo
+- Annual discount: 20% off
+EOF
+
+./target/release/hiveloom capability add support-bot \
+  --name support-runbook \
+  --description "Internal support procedures" \
+  --from-file skills/support-runbook.md
+```
+
+The markdown content is injected into the agent's system prompt at invocation
+time. The agent uses this knowledge when answering questions — no external HTTP
+endpoint required.
+
+---
+
+## 7. Other operations
+
+### Scheduling
+
+```bash
+./target/release/hiveloom schedule create support-bot \
   --cron "0 7 * * 1-5" \
   --timezone "America/New_York" \
-  --context "Check the inbox and post a summary to #daily-digest"
+  --context "Check the inbox and post a summary"
+
+./target/release/hiveloom schedule list support-bot
 ```
 
-One-time schedule also works:
+### Compaction
 
 ```bash
-./hiveloom/target/debug/hiveloom schedule create support-bot \
-  --one-time-at "2026-04-14T07:00:00Z" \
-  --timezone "UTC" \
-  --context "Run a one-time digest"
+./target/release/hiveloom agent compaction support-bot
+./target/release/hiveloom agent compaction support-bot --threshold 70
+./target/release/hiveloom compaction-log --tenant default
 ```
 
-Verify:
+### Auth tokens
 
 ```bash
-./hiveloom/target/debug/hiveloom schedule list support-bot --json
+./target/release/hiveloom auth token-create --scope platform:admin --json
+./target/release/hiveloom auth token-list
 ```
 
-## 5a. Manual MCP flow with curl (detailed)
-
-This is the easiest way to verify the agent is exposed over MCP even if you do
-not yet have a separate MCP desktop client connected.
-
-Assume:
-
-- Tenant slug: `default`
-- Agent name: `support-bot`
-- External base URL: `https://loom.example.com` (or `http://127.0.0.1:3000` for local)
-- Setup code from step 4: `<setup-code>`
-
-Inspect MCP metadata:
+### Export and backup
 
 ```bash
-curl -sS https://loom.example.com/.well-known/oauth-authorization-server | jq
-curl -sS https://loom.example.com/mcp/default/.well-known/oauth-protected-resource | jq
+./target/release/hiveloom agent export support-bot > manifest.yaml
+./target/release/hiveloom backup create --output backup.tar.gz
+./target/release/hiveloom backup list
 ```
 
-Exchange the one-time setup code for an authorization code:
+### Doctor (diagnostics)
 
 ```bash
-curl -sS -X POST https://loom.example.com/mcp/authorize \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "setup_code": "<setup-code>",
-    "tenant_slug": "default",
-    "client_id": "manual-test-client"
-  }' | jq
+./target/release/hiveloom doctor
 ```
 
-Exchange that authorization code for access and refresh tokens:
+---
+
+## 8. Expose MCP outside the VPS
+
+For remote access, bind to all interfaces and put TLS in front:
 
 ```bash
-curl -sS -X POST https://loom.example.com/mcp/token \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "grant_type": "authorization_code",
-    "code": "<authorization-code>",
-    "client_id": "manual-test-client"
-  }' | jq
+./target/release/hiveloom serve --host 0.0.0.0 --port 3000
 ```
 
-Use the returned bearer token:
-
-```bash
-# initialize
-curl -sS -X POST https://loom.example.com/mcp/default/support-bot \
-  -H "Authorization: Bearer <access-token>" \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' | jq
-
-# tools/list
-curl -sS -X POST https://loom.example.com/mcp/default/support-bot \
-  -H "Authorization: Bearer <access-token>" \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | jq
-
-# tools/call
-curl -sS -X POST https://loom.example.com/mcp/default/support-bot \
-  -H "Authorization: Bearer <access-token>" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "jsonrpc":"2.0","id":3,"method":"tools/call",
-    "params":{"name":"echo-httpbin","arguments":{"message":"hello from mcp"}}
-  }' | jq
-```
-
-Notes:
-
-- `initialize`, `tools/list`, and `tools/call` are the three supported
-  JSON-RPC methods on the MCP surface.
-- Unauthenticated MCP requests return `401`.
-- `tools/call` only succeeds if the underlying capability endpoint is real
-  and reachable.
-- If you only configured fake example endpoints, `tools/list` is the safest
-  verification step.
-
-## 5b. Add a simple MCP test tool
-
-If you want a capability that can be exercised safely from MCP, add a simple
-echo endpoint:
-
-```bash
-./hiveloom/target/debug/hiveloom capability add support-bot \
-  --name echo-httpbin \
-  --description "Echo request payload for MCP testing" \
-  --cap-endpoint https://httpbin.org/anything \
-  --auth-type none
-```
-
-Then the `tools/call` example above will return the echoed JSON payload.
-
-## 5c. Expose MCP outside the VPS
-
-For remote use, bind Hiveloom on the VPS and put TLS in front of it.
-
-Start the service so it is reachable from the reverse proxy:
-
-```bash
-cd /root/github/hiveloom-app
-./hiveloom/target/debug/hiveloom serve --host 0.0.0.0 --port 3000
-```
-
-Recommended production shape:
-
-1. Run Hiveloom on `127.0.0.1:3000` or `0.0.0.0:3000`.
-2. Put Nginx or Caddy in front of it on port 443.
-3. Terminate TLS at the proxy.
-4. Forward `Host` and `X-Forwarded-Proto` headers.
-5. Only expose the proxy publicly.
-
-Minimal Caddy example:
+Minimal Caddy config:
 
 ```caddy
 loom.example.com {
@@ -422,137 +397,23 @@ loom.example.com {
 }
 ```
 
-Minimal Nginx example:
-
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name loom.example.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header X-Forwarded-Proto https;
-    }
-}
-```
-
-Open the relevant firewall and security-group rules for port 443.
-
-For a quick personal test from your laptop without exposing the service
-publicly, use an SSH tunnel:
+For quick testing from your laptop without exposing publicly:
 
 ```bash
-ssh -L 3000:127.0.0.1:3000 <user>@<your-vps>
-```
-
-Then test locally against `http://127.0.0.1:3000`.
-
----
-
-## 6. Test compaction config
-
-```bash
-./hiveloom/target/debug/hiveloom agent compaction support-bot
-
-./hiveloom/target/debug/hiveloom agent compaction support-bot \
-  --threshold 70 \
-  --protected-turns 6 \
-  --show-indicator true
-
-./hiveloom/target/debug/hiveloom compaction-log --json
-```
-
-## 7. Test auth tokens
-
-```bash
-./hiveloom/target/debug/hiveloom auth token-create \
-  --scope platform:admin \
-  --json
-
-./hiveloom/target/debug/hiveloom auth token-list --json
-```
-
-## 8. Test export and backup
-
-```bash
-mkdir -p .hiveloom/manifests .hiveloom/backups
-
-./hiveloom/target/debug/hiveloom agent export support-bot \
-  > .hiveloom/manifests/support-bot.yaml
-
-./hiveloom/target/debug/hiveloom backup create \
-  --tenant default \
-  --output default-backup.tar.gz \
-  --json
-
-./hiveloom/target/debug/hiveloom backup list --json
-```
-
-Restore from that backup:
-
-```bash
-./hiveloom/target/debug/hiveloom backup restore \
-  --input /root/github/hiveloom-app/.hiveloom/backups/default-backup.tar.gz
+ssh -L 3000:127.0.0.1:3000 user@your-vps
 ```
 
 ---
 
-## 9. Files you should see
-
-Typical local files after the flow:
+## 9. Files after setup
 
 ```text
 .hiveloom/config.json
 .hiveloom/run/service.json
 .hiveloom/run/service.pid
+.hiveloom/run/endpoint
 .hiveloom/master.key
 .hiveloom/platform.db
 .hiveloom/tenants/<tenant-id>/store.db
-.hiveloom/manifests/support-bot.yaml
-.hiveloom/backups/default-backup.tar.gz
-.hiveloom/backups/backup-index.json
 .hiveloom/logs/service.log
 ```
-
----
-
-## 10. Current limitations
-
-| Limitation | Status | Workaround |
-|------------|--------|------------|
-| No `hiveloom agent chat` CLI command | Not yet built | Use MCP surface with `curl` or an MCP client |
-| MCP exposes tools only, not conversational chat | By design for launch | `tools/list` + `tools/call` are the interface |
-| Tenant ID vs slug resolution | Fixed; CLI sends slug, API resolves | Use `--tenant default` (slug) |
-| MCP requires HTTPS for external MCP clients | OAuth spec requirement | Use Caddy/Nginx for TLS termination |
-| Interactive mode requires a real TTY | By design (FR-049) | Use `ssh -t` when connecting remotely |
-
----
-
-## 11. Notes
-
-- Run commands from the repo root so `.hiveloom` auto-detection works.
-- `backup restore` is safest when the service is stopped.
-- The local CLI supports explicit remote use via `--endpoint` and `--token`.
-- MCP metadata reflects the external host when your proxy forwards `Host`
-  and `X-Forwarded-Proto`.
-- The MCP endpoint requires a bearer token; unauthenticated requests return
-  `401`.
-
----
-
-## Appendix: interactive mode CLI changes
-
-The interactive shell (`hiveloom` with no subcommand) was updated:
-
-- **Full command names**: suggestions strip shows `/health`, `/status`,
-  `/create-agent`, `/top`, etc. No single-letter shortcuts.
-- **Tab completion**: completes to `/command` (e.g., typing `sta` + Tab
-  yields `/start`), not a shorthand alias.
-- **Help output**: `/help` lists full command names with descriptions. No
-  one-letter aliases advertised.
-- **Fuzzy matching**: typing plain text like "show agents" resolves to
-  `/agents` with an "interpreted as" confirmation.
-- **Startup hint**: the composer placeholder shows
-  `try: /health, /status, /agents, /create-agent, /top`.
