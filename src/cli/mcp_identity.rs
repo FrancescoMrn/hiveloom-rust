@@ -104,7 +104,50 @@ pub async fn run(args: McpIdentityArgs) -> anyhow::Result<()> {
             let result: serde_json::Value = client
                 .post(&format!("/api/tenants/{}/mcp-identities", tenant), &body)
                 .await?;
-            println!("{}", serde_json::to_string_pretty(&result)?);
+            let identity_id = result.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+            // Immediately issue a setup code so users have everything they need
+            let setup = client
+                .post::<_, serde_json::Value>(
+                    &format!(
+                        "/api/tenants/{}/mcp-identities/{}/reissue-setup-code",
+                        tenant, identity_id
+                    ),
+                    &serde_json::json!({}),
+                )
+                .await
+                .ok();
+
+            if args.json {
+                let mut combined = result.clone();
+                if let Some(setup_val) = setup.as_ref() {
+                    if let Some(code) = setup_val.get("setup_code") {
+                        combined["setup_code"] = code.clone();
+                    }
+                    if let Some(exp) = setup_val.get("expires_at") {
+                        combined["setup_code_expires_at"] = exp.clone();
+                    }
+                }
+                println!("{}", serde_json::to_string_pretty(&combined)?);
+            } else {
+                println!("Created MCP identity '{}' ({})", name, identity_id);
+                if let Some(setup_val) = setup {
+                    if let Some(code) = setup_val.get("setup_code").and_then(|v| v.as_str()) {
+                        let endpoint = crate::cli::local::default_endpoint();
+                        let endpoint = endpoint.trim_end_matches('/');
+                        println!();
+                        println!("  Setup code:  {}", code);
+                        if let Some(ref a) = agent {
+                            println!("  MCP URL:     {}/mcp/{}/{}", endpoint, tenant, a);
+                        } else {
+                            println!("  MCP URL:     {}/mcp/{}/<agent-slug>", endpoint, tenant);
+                        }
+                        println!();
+                        println!("  Add the URL to your MCP client (Claude Desktop, Cursor, etc.).");
+                        println!("  Enter the setup code in the browser when prompted.");
+                    }
+                }
+            }
         }
         McpIdentityCommand::List { tenant, agent } => {
             let url = match &agent {

@@ -1,44 +1,87 @@
-# HiveLoom CLI — Manual Local Testing
+# HiveLoom CLI — User Guide
 
-This guide walks through a real local operator flow: install, configure, create
-an agent, chat with it, and expose it over MCP for external clients.
-
----
-
-## What this uses
-
-| Item              | Value                                       |
-|-------------------|---------------------------------------------|
-| Binary            | `./target/release/hiveloom`                 |
-| Local data dir    | `./.hiveloom` (auto-detected from cwd)      |
-| Default endpoint  | `http://127.0.0.1:3000`                     |
-
-If `.hiveloom` exists in the current working directory, the CLI uses it
-automatically for local testing. You can also set `HIVELOOM_DATA_DIR` explicitly.
+From zero to a working agent — installed, chatting, and accessible over MCP —
+in a handful of commands.
 
 ---
 
-## 0. Build
+## Contents
+
+1. [Install](#1-install)
+2. [5-minute quick start](#2-5-minute-quick-start)
+3. [Interactive mode](#3-interactive-mode)
+4. [Chat with your agent](#4-chat-with-your-agent)
+5. [MCP setup (Claude Desktop, Cursor, etc.)](#5-mcp-setup)
+6. [Markdown skills](#6-markdown-skills)
+7. [All CLI commands](#7-all-cli-commands)
+8. [Remote deployment](#8-remote-deployment)
+9. [Files and config](#9-files-and-config)
+
+---
+
+## 1. Install
+
+Build from source:
 
 ```bash
-cd /root/github/hiveloom-app/hiveloom
+git clone https://github.com/FrancescoMrn/hiveloom-rust.git
+cd hiveloom-rust
 cargo build --release
 ```
 
-## 1. Quick start with interactive mode
-
-The fastest way to get going — the interactive shell has a menu-driven UI:
+The binary is at `./target/release/hiveloom`. Optionally symlink it:
 
 ```bash
-./target/release/hiveloom
+sudo ln -s $(pwd)/target/release/hiveloom /usr/local/bin/hiveloom
 ```
 
-On launch you see a main menu with 6 categories:
+---
+
+## 2. 5-minute quick start
+
+### Option A: Interactive wizard (recommended for first-time users)
+
+```bash
+hiveloom
+```
+
+This opens a menu-driven TUI. Select **Setup** and follow the 5 steps:
+service → API key → agent → MCP → test chat.
+
+### Option B: Four commands (for scripting / CI)
+
+```bash
+# 1. Start the service (in a separate terminal, or background it with & )
+hiveloom serve
+
+# 2. Store your LLM API key
+echo "sk-ant-your-key-here" | hiveloom credential set anthropic
+
+# 3. Create an agent
+hiveloom agent create --name support-bot
+
+# 4. Chat with it
+hiveloom chat support-bot
+```
+
+That's it. You're chatting with your agent in 4 commands.
+
+---
+
+## 3. Interactive mode
+
+Launch the TUI with no arguments:
+
+```bash
+hiveloom
+```
+
+### Main menu
 
 ```
 ╭──────────────────────────────────────────────────────╮
 │  hiveloom                                            │
-│  ● online   0 agents   0 credentials   default       │
+│  ● online   1 agents   1 credentials   default       │
 ╰──────────────────────────────────────────────────────╯
 
   ▸ Setup          Get started with guided setup     →
@@ -49,162 +92,109 @@ On launch you see a main menu with 6 categories:
     System         Health, backups, logs
 ```
 
-Navigate with arrow keys and Enter. On a fresh install, select **Setup** to
-run the 5-step onboarding wizard:
+### Categories
 
-1. **Service** — checks status, starts if offline
-2. **API Key** — masked input for your Anthropic or OpenAI key
-3. **Agent** — create your first agent (name, system prompt)
-4. **MCP** — creates identity, shows MCP URL + setup code
-5. **Test Chat** — sends a message and shows the agent's response
+| Category       | Context panel    | Actions                              |
+|----------------|------------------|--------------------------------------|
+| **Setup**      | —                | 5-step onboarding wizard             |
+| **Agents**     | Agent table      | Create, Add Skill, Export            |
+| **Chat**       | —                | Opens chat with first agent          |
+| **Credentials**| Credential list  | Set, Rotate, Remove                  |
+| **MCP**        | Identity list    | Create Identity, Reissue Code        |
+| **System**     | —                | Health, Status, Doctor, Backup, Logs |
 
-After setup, go to **Chat** to talk to your agent, or **Agents** to manage
-agents with inline forms and context panels
+### Key bindings
 
----
+| Key         | Action                                         |
+|-------------|------------------------------------------------|
+| ↑ / ↓       | Navigate menu / context items                  |
+| Enter       | Select item / submit form / send chat          |
+| Tab         | Switch panel focus / next form field           |
+| Esc         | Go back one level                              |
+| `:`         | Open command bar (power users)                 |
+| Ctrl-C      | Quit                                           |
 
-## 2. Manual setup (non-interactive)
+### Inline forms
 
-### Start the service
+Create/edit operations render forms **within the TUI** — no need to exit to a
+terminal. Fields include text inputs, masked inputs (for API keys), and
+selection lists (for model choice).
 
-```bash
-./target/release/hiveloom serve --host 127.0.0.1 --port 3000
-```
+### Command bar (power users)
 
-In another terminal:
-
-```bash
-./target/release/hiveloom health
-./target/release/hiveloom status
-./target/release/hiveloom tenant list --json
-```
-
-### Store credentials
-
-Secrets are never passed as CLI arguments. Use one of:
-
-```bash
-# From environment variable
-export ANTHROPIC_API_KEY='sk-ant-...'
-./target/release/hiveloom credential set anthropic --from-env ANTHROPIC_API_KEY
-
-# From file
-./target/release/hiveloom credential set anthropic --from-file /path/to/key
-
-# From stdin
-echo 'sk-ant-...' | ./target/release/hiveloom credential set anthropic
-```
-
-### Create an agent
-
-```bash
-./target/release/hiveloom agent create \
-  --name support-bot \
-  --model claude-sonnet-4-20250514 \
-  --system-prompt "You are a helpful support assistant." \
-  --scope-mode dual
-```
-
-### Add capabilities
-
-HTTP endpoint capability:
-
-```bash
-./target/release/hiveloom capability add support-bot \
-  --name echo-httpbin \
-  --description "Echo request payload for testing" \
-  --cap-endpoint https://httpbin.org/anything \
-  --auth-type none
-```
-
-Markdown skill (knowledge injected into system prompt):
-
-```bash
-./target/release/hiveloom capability add support-bot \
-  --name product-faq \
-  --description "Product FAQ knowledge" \
-  --from-file skills/product-faq.md
-```
-
-Verify:
-
-```bash
-./target/release/hiveloom agent list
-./target/release/hiveloom credential list
-./target/release/hiveloom capability list support-bot
-```
+Press `:` from any screen to open a vim-style command bar with autocomplete.
+Type any CLI command (e.g., `agent list`, `credential set anthropic`).
 
 ---
 
-## 3. Chat with the agent
+## 4. Chat with your agent
 
 ### CLI chat command
 
 ```bash
-./target/release/hiveloom chat support-bot
+hiveloom chat support-bot
 ```
 
-This starts a stdin/stdout conversation loop. Type messages, see responses.
-Maintains conversation context across messages. Ctrl-C or `/exit` to quit.
+A stdin/stdout conversation loop. Type messages, get responses. Conversation
+context is maintained across messages. `Ctrl-C`, `Ctrl-D`, or `/exit` to quit.
 
-### Interactive shell chat
+### Interactive mode chat
 
-From inside `hiveloom` interactive mode:
-
-```
-> chat support-bot
-Chatting with support-bot. Type /exit or Esc to return.
-you: What can you help me with?
-support-bot: I can help you with...
-```
+From the TUI, select **Chat** from the main menu, or press Enter on an agent
+in the Agents submenu and select **Chat** from the popup.
 
 ---
 
-## 4. MCP setup (for Claude Desktop, Cursor, etc.)
+## 5. MCP setup
 
-### Create MCP identity
+Connect external MCP clients (Claude Desktop, Cursor, etc.) to your agent.
 
-```bash
-./target/release/hiveloom mcp-identity create \
-  --tenant default \
-  --name my-desktop \
-  --agent support-bot
-```
-
-### Get a setup code
+### One command to get the MCP URL and setup code
 
 ```bash
-./target/release/hiveloom mcp-identity reissue-setup-code <identity-id> \
-  --tenant default
+hiveloom mcp-identity create --tenant default --name my-desktop --agent support-bot
 ```
 
-This prints a one-time setup code (valid 24 hours).
+Output:
+
+```
+Created MCP identity 'my-desktop' (abc123...)
+
+  Setup code:  7f3ab2c19e4d0815...
+  MCP URL:     http://127.0.0.1:3000/mcp/default/support-bot
+
+  Add the URL to your MCP client (Claude Desktop, Cursor, etc.).
+  Enter the setup code in the browser when prompted.
+```
 
 ### Connect from Claude Desktop
 
-1. Add the MCP server URL to Claude Desktop:
-   ```
-   http://127.0.0.1:3000/mcp/default/support-bot
-   ```
-2. Claude Desktop will discover the OAuth endpoints automatically
-3. Enter the setup code when prompted in the browser
-4. Once authorized, Claude Desktop connects and shows three tools:
+1. Copy the MCP URL into Claude Desktop's MCP server settings
+2. Claude Desktop discovers the OAuth endpoints automatically
+3. When prompted, enter the setup code in the browser
+4. Claude Desktop now shows 3 tools from your agent:
    - **chat** — send messages to the agent
    - **memory** — search stored memories
    - **list_conversations** — list prior conversations
 
-### Manual MCP flow with curl
-
-Verify OAuth discovery:
+### Issue a new setup code (if the first one was used or expired)
 
 ```bash
-curl -s http://127.0.0.1:3000/.well-known/oauth-authorization-server | jq
-curl -s http://127.0.0.1:3000/mcp/default/support-bot/.well-known/oauth-protected-resource | jq
+hiveloom mcp-identity reissue-setup-code <identity-id> --tenant default
 ```
 
-Register a client:
+Setup codes expire after 24 hours.
+
+### Manual MCP flow with curl
+
+For testing or non-standard clients:
 
 ```bash
+# 1. OAuth discovery
+curl -s http://127.0.0.1:3000/.well-known/oauth-authorization-server | jq
+curl -s http://127.0.0.1:3000/mcp/default/support-bot/.well-known/oauth-protected-resource | jq
+
+# 2. Register a client
 curl -s -X POST http://127.0.0.1:3000/oauth/register \
   -H 'Content-Type: application/json' \
   -d '{
@@ -214,192 +204,195 @@ curl -s -X POST http://127.0.0.1:3000/oauth/register \
     "response_types": ["code"],
     "token_endpoint_auth_method": "client_secret_post"
   }' | jq
-```
 
-Authorize (submit setup code — in practice, this happens in a browser):
+# 3. Authorize with setup code (returns 302 redirect with ?code=...)
+curl -s -D - -X POST http://127.0.0.1:3000/oauth/authorize \
+  -d "response_type=code&client_id=<client_id>&redirect_uri=http%3A%2F%2F127.0.0.1%3A9999%2Fcallback&state=test&code_challenge=<S256_challenge>&code_challenge_method=S256&scope=mcp&setup_code=<setup_code>"
 
-```bash
-curl -s -X POST http://127.0.0.1:3000/oauth/authorize \
-  -d "response_type=code&client_id=<client_id>&redirect_uri=http%3A%2F%2F127.0.0.1%3A9999%2Fcallback&state=test&code_challenge=<challenge>&code_challenge_method=S256&scope=mcp&setup_code=<code>" \
-  -D -
-```
-
-Exchange authorization code for tokens:
-
-```bash
+# 4. Exchange authorization code for tokens
 curl -s -X POST http://127.0.0.1:3000/oauth/token \
   -H 'Content-Type: application/x-www-form-urlencoded' \
-  -d "grant_type=authorization_code&code=<auth_code>&redirect_uri=http%3A%2F%2F127.0.0.1%3A9999%2Fcallback&client_id=<client_id>&client_secret=<client_secret>&code_verifier=<verifier>" | jq
+  -d "grant_type=authorization_code&code=<auth_code>&redirect_uri=http%3A%2F%2F127.0.0.1%3A9999%2Fcallback&client_id=<client_id>&client_secret=<client_secret>&code_verifier=<code_verifier>" | jq
+
+# 5. Use the access token
+curl -s -X POST http://127.0.0.1:3000/mcp/default/support-bot \
+  -H "Authorization: Bearer <access_token>" \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq
 ```
-
-Use the bearer token:
-
-```bash
-# Initialize
-curl -s -X POST http://127.0.0.1:3000/mcp/default/support-bot \
-  -H "Authorization: Bearer <access_token>" \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' | jq
-
-# List tools (returns: chat, memory, list_conversations)
-curl -s -X POST http://127.0.0.1:3000/mcp/default/support-bot \
-  -H "Authorization: Bearer <access_token>" \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | jq
-
-# Chat with the agent (returns SSE stream)
-curl -s -X POST http://127.0.0.1:3000/mcp/default/support-bot \
-  -H "Authorization: Bearer <access_token>" \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"chat","arguments":{"message":"Hello!"}}}'
-
-# Search memory
-curl -s -X POST http://127.0.0.1:3000/mcp/default/support-bot \
-  -H "Authorization: Bearer <access_token>" \
-  -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memory","arguments":{"query":"preferences"}}}' | jq
-```
-
----
-
-## 5. Interactive mode
-
-The interactive CLI is a menu-driven TUI launched by running `hiveloom` with
-no subcommand:
-
-```bash
-./target/release/hiveloom
-```
-
-### Menu-driven navigation
-
-The main screen shows 6 categories. Navigate with arrow keys, press Enter
-to open a category. Each category has:
-
-- **Left panel**: Available actions (Create, Add Skill, etc.)
-- **Right panel**: Context table showing existing items (agents, credentials, etc.)
-- **Tab**: Switch focus between action panel and context panel
-- **Enter on context item**: Opens an action popup (Chat, Edit, Delete, etc.)
-
-### Categories
-
-| Category       | Context Panel           | Actions                              |
-|----------------|-------------------------|--------------------------------------|
-| **Setup**      | —                       | 5-step onboarding wizard             |
-| **Agents**     | Agent table             | Create, Add Skill, Export            |
-| **Chat**       | —                       | Opens chat with first agent          |
-| **Credentials**| Credential list         | Set, Rotate, Remove                  |
-| **MCP**        | Identity list           | Create Identity, Reissue Code        |
-| **System**     | —                       | Health, Status, Doctor, Backup, Logs |
-
-### Inline forms
-
-Create/edit operations render forms within the TUI — no need to exit to a
-terminal. Forms support text fields, masked input (for API keys), and
-selection lists (for model choice).
-
-### Command bar (power users)
-
-Press `:` from any screen to open a vim-style command bar with autocomplete.
-Type any CLI command (e.g., `agent list`, `credential set anthropic`).
-
-### Key bindings
-
-| Key       | Action                                    |
-|-----------|-------------------------------------------|
-| ↑ / ↓     | Navigate menu items / context panel rows  |
-| Enter     | Select menu item / submit form / send chat |
-| Tab       | Switch panel focus / next form field      |
-| Esc       | Go back one level                         |
-| `:`       | Open command bar                          |
-| Ctrl-C    | Quit                                      |
 
 ---
 
 ## 6. Markdown skills
 
-Agents can have markdown-based knowledge files that enrich their system prompt:
+Attach markdown files as agent knowledge — content is injected into the
+agent's system prompt at invocation time, no external HTTP endpoint needed.
 
 ```bash
-cat > skills/support-runbook.md << 'EOF'
-# Support Runbook
+cat > product-faq.md << 'EOF'
+# Product FAQ
 
-## Password Reset
-1. Verify customer identity
-2. Send password reset link
-3. Confirm reset within 15 minutes
+## What is Hiveloom?
+An open-source AI agent platform.
 
 ## Pricing
-- Starter: $29/mo
-- Pro: $99/mo
-- Annual discount: 20% off
+Free. Open source. Self-hosted.
 EOF
 
-./target/release/hiveloom capability add support-bot \
-  --name support-runbook \
-  --description "Internal support procedures" \
-  --from-file skills/support-runbook.md
+hiveloom capability add support-bot \
+  --name product-faq \
+  --description "Product FAQ knowledge" \
+  --from-file product-faq.md
 ```
 
-The markdown content is injected into the agent's system prompt at invocation
-time. The agent uses this knowledge when answering questions — no external HTTP
-endpoint required.
+The agent now uses this knowledge when answering questions.
 
 ---
 
-## 7. Other operations
+## 7. All CLI commands
+
+### Server
+
+| Command | Description |
+|---------|-------------|
+| `hiveloom serve` | Start the HTTP service (default `127.0.0.1:3000`) |
+| `hiveloom health` | Check if the service is responding |
+| `hiveloom status` | Show service state and tenant summary |
+| `hiveloom doctor` | Diagnose data directory and store integrity |
+
+### Credentials
+
+Secrets are never passed as CLI arguments. Use one of:
+
+| Command | Description |
+|---------|-------------|
+| `hiveloom credential set <name> --from-env VAR` | Read from environment variable |
+| `hiveloom credential set <name> --from-file PATH` | Read from file |
+| `echo "secret" \| hiveloom credential set <name>` | Read from stdin |
+| `hiveloom credential list` | List credentials (values never shown) |
+| `hiveloom credential rotate <name>` | Replace the secret |
+| `hiveloom credential remove <name>` | Delete the credential |
+
+### Agents
+
+| Command | Description |
+|---------|-------------|
+| `hiveloom agent create --name <name>` | Create a new agent |
+| `hiveloom agent list` | List all agents in the tenant |
+| `hiveloom agent show <id>` | Show agent details |
+| `hiveloom agent edit <id>` | Edit name, model, system prompt |
+| `hiveloom agent delete <id>` | Delete an agent |
+| `hiveloom agent versions <id>` | List version history |
+| `hiveloom agent rollback <id> --to-version N` | Roll back to version N |
+| `hiveloom agent export <id>` | Export as YAML manifest |
+| `hiveloom agent compaction <id>` | View or edit compaction settings |
+| `hiveloom agent reflect <id>` | Trigger self-reflection |
+| `hiveloom agent bind <id> --surface slack --channel <ch>` | Bind to a surface |
+
+### Capabilities (tools + skills)
+
+| Command | Description |
+|---------|-------------|
+| `hiveloom capability add <agent> --cap-endpoint URL` | Add HTTP capability |
+| `hiveloom capability add <agent> --from-file PATH.md` | Add markdown skill |
+| `hiveloom capability list <agent>` | List capabilities |
+| `hiveloom capability show <agent> <name>` | Show details |
+| `hiveloom capability edit <agent> <name>` | Edit capability |
+| `hiveloom capability remove <agent> <name>` | Remove capability |
+
+### Chat
+
+| Command | Description |
+|---------|-------------|
+| `hiveloom chat <agent>` | Interactive stdin/stdout chat with an agent |
+| `hiveloom` (interactive mode → Chat) | Chat within the TUI |
+
+### MCP (external client access)
+
+| Command | Description |
+|---------|-------------|
+| `hiveloom mcp-identity create --tenant T --name N --agent A` | Create identity, issues setup code |
+| `hiveloom mcp-identity list --tenant T` | List identities |
+| `hiveloom mcp-identity show <id> --tenant T` | Show details |
+| `hiveloom mcp-identity reissue-setup-code <id> --tenant T` | Issue a new setup code |
+| `hiveloom mcp-identity map <id> --tenant T --person-id P` | Map to a person |
+| `hiveloom mcp-identity unmap <id> --tenant T` | Remove person mapping |
+| `hiveloom mcp-identity revoke <id> --tenant T` | Revoke the identity |
 
 ### Scheduling
 
-```bash
-./target/release/hiveloom schedule create support-bot \
-  --cron "0 7 * * 1-5" \
-  --timezone "America/New_York" \
-  --context "Check the inbox and post a summary"
+| Command | Description |
+|---------|-------------|
+| `hiveloom schedule create <agent> --cron "0 7 * * *"` | Create scheduled job |
+| `hiveloom schedule create <agent> --one-time-at "2026-04-16T07:00:00Z"` | One-time job |
+| `hiveloom schedule list <agent>` | List jobs |
+| `hiveloom schedule pause <agent> <job>` | Pause a job |
+| `hiveloom schedule resume <agent> <job>` | Resume a paused job |
+| `hiveloom schedule delete <agent> <job>` | Delete a job |
 
-./target/release/hiveloom schedule list support-bot
-```
+### Events
 
-### Compaction
+| Command | Description |
+|---------|-------------|
+| `hiveloom event subscribe <agent> --event-type T --auth-token AT` | Subscribe to events |
+| `hiveloom event list <agent>` | List subscriptions |
+| `hiveloom event disable <agent> <sub>` | Disable subscription |
+| `hiveloom event enable <agent> <sub>` | Re-enable subscription |
+| `hiveloom event delete <agent> <sub>` | Delete subscription |
 
-```bash
-./target/release/hiveloom agent compaction support-bot
-./target/release/hiveloom agent compaction support-bot --threshold 70
-./target/release/hiveloom compaction-log --tenant default
-```
+### Tenants
+
+| Command | Description |
+|---------|-------------|
+| `hiveloom tenant list` | List all tenants |
+| `hiveloom tenant create --name N --slug S` | Create a tenant |
+| `hiveloom tenant show <id>` | Show tenant |
+| `hiveloom tenant disable <id>` | Disable a tenant |
+| `hiveloom tenant delete <id>` | Soft-delete |
 
 ### Auth tokens
 
-```bash
-./target/release/hiveloom auth token-create --scope platform:admin --json
-./target/release/hiveloom auth token-list
-```
+| Command | Description |
+|---------|-------------|
+| `hiveloom auth token-create --scope platform:admin` | Create a bearer token |
+| `hiveloom auth token-list` | List tokens |
+| `hiveloom auth token-revoke <id>` | Revoke a token |
 
-### Export and backup
+### Operations
 
-```bash
-./target/release/hiveloom agent export support-bot > manifest.yaml
-./target/release/hiveloom backup create --output backup.tar.gz
-./target/release/hiveloom backup list
-```
+| Command | Description |
+|---------|-------------|
+| `hiveloom logs` | View recent logs |
+| `hiveloom tail` | Stream logs |
+| `hiveloom top` | Live TUI dashboard |
+| `hiveloom compaction-log` | View context compaction events |
+| `hiveloom backup create --output FILE` | Create a backup |
+| `hiveloom backup list` | List backups |
+| `hiveloom backup restore --input FILE` | Restore from backup |
+| `hiveloom apply -f manifest.yaml` | Apply an agent manifest |
 
-### Doctor (diagnostics)
+### Global flags
 
-```bash
-./target/release/hiveloom doctor
-```
+Available on most commands:
+
+| Flag | Description |
+|------|-------------|
+| `--tenant <slug>` | Tenant (default: `default`) |
+| `--endpoint <url>` | API endpoint (default: auto-detected) |
+| `--token <token>` | Bearer token for remote access |
+| `--json` | Output as JSON instead of a human-readable table |
 
 ---
 
-## 8. Expose MCP outside the VPS
+## 8. Remote deployment
 
 For remote access, bind to all interfaces and put TLS in front:
 
 ```bash
-./target/release/hiveloom serve --host 0.0.0.0 --port 3000
+hiveloom serve --host 0.0.0.0 --port 3000
 ```
 
-Minimal Caddy config:
+### Minimal Caddy config
 
 ```caddy
 loom.example.com {
@@ -411,23 +404,60 @@ loom.example.com {
 }
 ```
 
-For quick testing from your laptop without exposing publicly:
+### Minimal Nginx config
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name loom.example.com;
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+```
+
+### Quick testing without public exposure
 
 ```bash
 ssh -L 3000:127.0.0.1:3000 user@your-vps
 ```
 
+Then connect to `http://127.0.0.1:3000` on your laptop.
+
 ---
 
-## 9. Files after setup
+## 9. Files and config
+
+Data directory discovery priority:
+
+1. `HIVELOOM_DATA_DIR` env var
+2. `./.hiveloom/` in the current working directory
+3. `~/.hiveloom/` in home directory
+4. `/var/lib/hiveloom/` (system default)
+
+Files created by `hiveloom serve`:
 
 ```text
-.hiveloom/config.json
-.hiveloom/run/service.json
-.hiveloom/run/service.pid
-.hiveloom/run/endpoint
-.hiveloom/master.key
-.hiveloom/platform.db
-.hiveloom/tenants/<tenant-id>/store.db
-.hiveloom/logs/service.log
+<data-dir>/config.json              # Local config (endpoint, port)
+<data-dir>/run/service.json         # Process info (pid, endpoint)
+<data-dir>/run/service.pid          # Process ID
+<data-dir>/run/endpoint             # Service URL for CLI auto-detection
+<data-dir>/master.key               # AES-256 key for credential vault (chmod 600)
+<data-dir>/platform.db              # Global platform store (SQLite)
+<data-dir>/tenants/<uuid>/store.db  # Per-tenant store (SQLite, WAL mode)
+<data-dir>/logs/service.log         # Service logs
+<data-dir>/backups/                 # Backup archives
 ```
+
+### Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `HIVELOOM_DATA_DIR` | Override data directory location |
+| `HIVELOOM_ENDPOINT` | Override CLI API endpoint |
+| `HIVELOOM_TENANT` | Override default tenant slug |
+| `SLACK_SIGNING_SECRET` | Slack webhook signing secret (optional) |
+| `SLACK_BOT_TOKEN` | Slack bot OAuth token (optional) |
