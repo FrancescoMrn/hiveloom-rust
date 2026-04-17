@@ -16,6 +16,7 @@ pub mod mcp_identity;
 pub mod schedule;
 pub mod serve;
 pub mod tenant;
+pub mod tls;
 pub mod top;
 pub mod tui;
 pub mod upgrade;
@@ -75,6 +76,8 @@ pub enum Command {
     CompactionLog(compaction_log::CompactionLogArgs),
     /// Chat with an agent
     Chat(chat::ChatArgs),
+    /// Generate TLS-related config (currently: Caddyfile)
+    Tls(tls::TlsArgs),
     /// Interactive mode / first-run wizard
     Interactive,
 }
@@ -106,6 +109,7 @@ pub async fn dispatch(cli: Cli) -> anyhow::Result<()> {
         Command::Backup(args) => backup::run(args).await,
         Command::CompactionLog(args) => compaction_log::run(args).await,
         Command::Chat(args) => chat::run(args).await,
+        Command::Tls(args) => tls::run(args).await,
         Command::Interactive => interactive::run().await,
     }
 }

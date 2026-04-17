@@ -392,6 +392,10 @@ For remote access, bind to all interfaces and put TLS in front:
 hiveloom serve --host 0.0.0.0 --port 3000
 ```
 
+For a complete HTTPS + DNS + firewall recipe (and a `hiveloom tls render` helper that
+prints a ready-to-use Caddyfile for your hostname), see
+[`deployment-hardening.md`](deployment-hardening.md).
+
 ### Minimal Caddy config
 
 ```caddy

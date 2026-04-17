@@ -58,10 +58,10 @@ pub async fn run_upgrade(args: UpgradeArgs) -> anyhow::Result<()> {
         println!();
         println!("To upgrade Hiveloom:");
         println!();
-        println!("  curl -fsSL https://get.hiveloom.cloud/install.sh | bash");
+        println!("  curl -fsSL https://bin.hiveloom.cloud/install.sh | bash");
         println!();
         println!("Or download the binary directly:");
-        println!("  https://get.hiveloom.cloud/releases/{target}/");
+        println!("  https://bin.hiveloom.cloud/releases/{target}/");
         println!();
         println!("After upgrading, restart the service:");
         println!("  sudo systemctl restart hiveloom");
@@ -87,7 +87,7 @@ pub async fn run_rollback(args: RollbackArgs) -> anyhow::Result<()> {
         println!("Binary rollback is not yet implemented.");
         println!("To revert, reinstall the previous version:");
         println!(
-            "  curl -fsSL https://get.hiveloom.cloud/install.sh | bash -s -- --version <VERSION>"
+            "  curl -fsSL https://bin.hiveloom.cloud/install.sh | bash -s -- --version <VERSION>"
         );
     }
 
