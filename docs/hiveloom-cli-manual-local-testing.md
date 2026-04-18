@@ -464,4 +464,51 @@ Files created by `hiveloom serve`:
 | `HIVELOOM_ENDPOINT` | Override CLI API endpoint |
 | `HIVELOOM_TENANT` | Override default tenant slug |
 | `SLACK_SIGNING_SECRET` | Slack webhook signing secret (optional) |
-| `SLACK_BOT_TOKEN` | Slack bot OAuth token (optional) |
+| `SLACK_CLIENT_ID` | Slack app client ID for workspace installation |
+| `SLACK_CLIENT_SECRET` | Slack app client secret for workspace installation |
+| `SLACK_APP_ID` | Slack app ID (optional, for operator visibility) |
+| `SLACK_ACCESS_TOKEN` | Preferred Slack access token env var. Accepts either a bot token (`xoxb-...`) or, if needed, a user token (`xoxp-...`). |
+| `SLACK_BOT_TOKEN` | Legacy alias for `SLACK_ACCESS_TOKEN` when using a bot token |
+| `SLACK_USER_TOKEN` | Legacy alias for `SLACK_ACCESS_TOKEN` when using a user token |
+
+### Slack workspace setup
+
+To connect an agent to a real Slack workspace and have it respond after being
+invited into a channel:
+
+1. Put Hiveloom behind a public **HTTPS** hostname
+2. Set `SLACK_SIGNING_SECRET`, `SLACK_CLIENT_ID`, and `SLACK_CLIENT_SECRET`
+3. In Slack App settings, add this redirect URL:
+
+```text
+https://your-hostname/slack/oauth/callback
+```
+
+4. Open the install URL in a browser:
+
+```text
+https://your-hostname/slack/install?tenant=default
+```
+
+5. After install, point **Event Subscriptions → Request URL** to:
+
+```text
+https://your-hostname/slack/events
+```
+
+6. Invite the Slack app into the target channel
+7. Bind the agent to that channel's Slack ID:
+
+```bash
+hiveloom agent bind <agent-id> --surface slack --channel C12345678
+```
+
+For operator verification, Hiveloom exposes:
+
+```text
+GET /slack/setup
+```
+
+That endpoint reports the exact Events URL derived from the incoming request
+headers, the install URL, whether the request is arriving over HTTPS, and
+whether Slack event delivery is fully ready.
