@@ -4,6 +4,9 @@ target/
 *.rlib
 *.prof*
 
+# Release artifacts (built by scripts/release.sh, uploaded to R2)
+/dist/
+
 # IDE
 .idea/
 .vscode/
