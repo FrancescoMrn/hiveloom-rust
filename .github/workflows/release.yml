@@ -21,21 +21,70 @@ env:
   R2_BUCKET: hiveloom-releases-public
 
 jobs:
-  release:
-    name: build linux targets and upload to R2
+  # Fail fast if R2 creds or endpoint are broken, before we burn ~15 minutes
+  # on builds.
+  preflight:
+    name: verify R2 access
     runs-on: ubuntu-latest
     environment: Production
+    steps:
+      - name: Install rclone
+        run: curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone for R2
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          if [ -z "$R2_ACCOUNT_ID" ]; then
+            echo "R2_ACCOUNT_ID secret is empty" >&2
+            exit 1
+          fi
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${R2_ACCESS_KEY_ID}
+          secret_access_key = ${R2_SECRET_ACCESS_KEY}
+          endpoint = https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+          region = auto
+          no_check_bucket = true
+          EOF
+
+      - name: Probe bucket
+        run: rclone lsd "r2:${R2_BUCKET}" --max-depth 1
+
+  # Build each linux target in its own job. Each uploads its own artifacts to
+  # /releases/<version>/ as soon as it's ready. No latest-mirror or install.sh
+  # upload here — the finalize job handles those.
+  build:
+    name: build ${{ matrix.target }}
+    needs: preflight
+    runs-on: ubuntu-latest
+    environment: Production
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - linux-x86_64
+          - linux-aarch64
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
-      - name: Install cross
+      - name: Install cross (aarch64 only)
+        if: matrix.target == 'linux-aarch64'
         run: cargo install cross --locked
 
-      - name: Install aarch64 strip
+      - name: Install aarch64 strip (aarch64 only)
+        if: matrix.target == 'linux-aarch64'
         run: sudo apt-get update && sudo apt-get install -y binutils-aarch64-linux-gnu
 
       - name: Install rclone
@@ -59,8 +108,87 @@ jobs:
           no_check_bucket = true
           EOF
 
-      - name: Run release
-        run: ./scripts/release.sh
+      - name: Build and upload ${{ matrix.target }}
+        run: ./scripts/release.sh --targets ${{ matrix.target }} --no-latest --no-install-sh
+
+  # After both targets are live under /releases/<version>/, mirror to
+  # /releases/latest/ with a server-side copy (fast) and publish install.sh.
+  finalize:
+    name: mirror to latest and publish install.sh
+    needs: build
+    runs-on: ubuntu-latest
+    environment: Production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rclone
+        run: curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone for R2
         env:
-          RCLONE_REMOTE: r2
-          R2_BUCKET: ${{ env.R2_BUCKET }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          mkdir -p ~/.config/rclone
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${R2_ACCESS_KEY_ID}
+          secret_access_key = ${R2_SECRET_ACCESS_KEY}
+          endpoint = https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+          region = auto
+          no_check_bucket = true
+          EOF
+
+      - name: Read version from Cargo.toml
+        id: version
+        run: |
+          v=$(grep -m1 -E '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Version: $v"
+
+      - name: Mirror /releases/${{ steps.version.outputs.version }} → /releases/latest
+        run: |
+          rclone copy \
+            "r2:${R2_BUCKET}/releases/${{ steps.version.outputs.version }}/" \
+            "r2:${R2_BUCKET}/releases/latest/" \
+            --progress
+
+      - name: Publish install.sh at bucket root
+        run: |
+          stage=$(mktemp -d)
+          cp scripts/install.sh "$stage/install.sh"
+          rclone copy "$stage" "r2:${R2_BUCKET}/" --include "install.sh" --progress
+
+  # Tag the released commit on origin as v<Cargo.toml version>. Skipped
+  # silently if a tag with that name already exists on the remote (so re-runs
+  # on the same version are idempotent).
+  tag:
+    name: tag v<version> on origin
+    needs: finalize
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from Cargo.toml
+        id: version
+        run: |
+          v=$(grep -m1 -E '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag (if absent)
+        env:
+          TAG: v${{ steps.version.outputs.version }}
+        run: |
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "refs/tags/${TAG}"; then
+            echo "Tag ${TAG} already exists on origin — skipping"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" -m "Release ${TAG}"
+          git push origin "${TAG}"

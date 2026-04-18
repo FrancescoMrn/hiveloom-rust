@@ -14,6 +14,30 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Block merges that would re-release an already-tagged version. The release
+  # workflow treats re-runs as idempotent, but forgetting to bump Cargo.toml
+  # before merging to main is the real user error — catch it here.
+  # Only runs on pushes to main and PRs targeting main; develop is exempt.
+  version-check:
+    name: cargo version not yet tagged
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag doesn't exist on origin
+        run: |
+          v=$(grep -m1 -E '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+          tag="v$v"
+          if [ -z "$v" ]; then
+            echo "::error::Could not read version from Cargo.toml"
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/${tag}" | grep -q "refs/tags/${tag}"; then
+            echo "::error::Tag ${tag} already exists on origin. Bump \`version\` in Cargo.toml before merging to main."
+            exit 1
+          fi
+          echo "ok: ${tag} is not yet tagged on origin"
+
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
