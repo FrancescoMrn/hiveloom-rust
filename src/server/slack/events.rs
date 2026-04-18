@@ -26,6 +26,7 @@ struct DispatchContext {
     capabilities: Vec<Capability>,
     conversation: Conversation,
     api_key: String,
+    slack_access_token: String,
     #[allow(dead_code)]
     thread_ref: String,
 }
@@ -34,7 +35,6 @@ struct DispatchContext {
 pub async fn dispatch_event(
     state: &Arc<super::super::AppState>,
     event: &SlackEvent,
-    bot_token: &str,
 ) -> anyhow::Result<()> {
     // Only handle message and app_mention events
     match event.event_type.as_str() {
@@ -148,12 +148,24 @@ pub async fn dispatch_event(
                 }
             };
 
+        let slack_access_token = match super::resolve_access_token(&state_clone, conn, tenant_id)? {
+            Some(token) => token.value,
+            None => {
+                tracing::warn!(
+                    tenant_id = %tenant_id,
+                    "No Slack access token found for tenant"
+                );
+                return Ok(None);
+            }
+        };
+
         Ok(Some(DispatchContext {
             tenant_id,
             agent,
             capabilities,
             conversation,
             api_key,
+            slack_access_token,
             thread_ref: thread_ref_val.to_string(),
         }))
     })
@@ -198,7 +210,7 @@ pub async fn dispatch_event(
         .await??;
 
     // Phase 3: Post reply via Slack API (async)
-    let surface = SlackSurface::new(bot_token);
+    let surface = SlackSurface::new(&ctx.slack_access_token);
     let reply_thread = event.thread_ts.as_deref().unwrap_or(&event.ts);
     surface
         .send_message(&event.channel, Some(reply_thread), &result.response)
