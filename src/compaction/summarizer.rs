@@ -203,7 +203,7 @@ fn hard_truncate_summary(summary: &str, counter: &TokenCounter, max_tokens: usiz
     let mut hi = lines.len();
 
     while lo < hi {
-        let mid = (lo + hi + 1) / 2;
+        let mid = (lo + hi).div_ceil(2);
         let candidate: String = lines[..mid].join("\n");
         if counter.count_text(&candidate) <= max_tokens {
             lo = mid;

@@ -99,14 +99,22 @@ pub async fn register_client(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let client_id = format!("mcp_client_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
+    let client_id = format!(
+        "mcp_client_{}",
+        uuid::Uuid::new_v4().to_string().replace('-', "")
+    );
     let client_secret = format!("mcp_secret_{}", oauth_server::generate_token());
     let secret_hash = oauth_server::hash_token(&client_secret);
 
-    let grant_types = body
-        .grant_types
-        .unwrap_or_else(|| vec!["authorization_code".to_string(), "refresh_token".to_string()]);
-    let response_types = body.response_types.unwrap_or_else(|| vec!["code".to_string()]);
+    let grant_types = body.grant_types.unwrap_or_else(|| {
+        vec![
+            "authorization_code".to_string(),
+            "refresh_token".to_string(),
+        ]
+    });
+    let response_types = body
+        .response_types
+        .unwrap_or_else(|| vec!["code".to_string()]);
     let auth_method = body
         .token_endpoint_auth_method
         .as_deref()
@@ -156,10 +164,7 @@ pub struct AuthorizeParams {
     pub scope: Option<String>,
 }
 
-fn render_authorize_html(
-    params: &AuthorizeParams,
-    error_message: Option<&str>,
-) -> Html<String> {
+fn render_authorize_html(params: &AuthorizeParams, error_message: Option<&str>) -> Html<String> {
     let client_id = html_escape(params.client_id.as_deref().unwrap_or(""));
     let redirect_uri = html_escape(params.redirect_uri.as_deref().unwrap_or(""));
     let state = html_escape(params.state.as_deref().unwrap_or(""));
@@ -255,8 +260,8 @@ pub async fn authorize_submit(
         match McpOAuthClient::get_by_client_id(&conn, &submission.client_id) {
             Ok(Some(client)) => {
                 // Verify redirect_uri matches one of the registered URIs
-                let uris: Vec<String> = serde_json::from_str(&client.redirect_uris)
-                    .unwrap_or_default();
+                let uris: Vec<String> =
+                    serde_json::from_str(&client.redirect_uris).unwrap_or_default();
                 if !uris.contains(&submission.redirect_uri) {
                     return (
                         StatusCode::BAD_REQUEST,
@@ -279,8 +284,7 @@ pub async fn authorize_submit(
                     .into_response();
             }
             Err(_) => {
-                return render_authorize_html(&form_params, Some("Internal error"))
-                    .into_response();
+                return render_authorize_html(&form_params, Some("Internal error")).into_response();
             }
         }
     }
@@ -319,7 +323,9 @@ pub async fn authorize_submit(
         // Remove any existing registration for this client_id (re-authorization).
         // The client_id column has a UNIQUE constraint, so we must delete the
         // old registration before creating a new one with the fresh auth code.
-        if let Ok(Some(existing)) = McpClientRegistration::get_by_client_id(conn, &submission.client_id) {
+        if let Ok(Some(existing)) =
+            McpClientRegistration::get_by_client_id(conn, &submission.client_id)
+        {
             let _ = McpClientRegistration::delete(conn, existing.id);
         }
 
@@ -704,8 +710,7 @@ async fn refresh_token(
         let access_hash = oauth_server::hash_token(&access_token);
         let new_refresh_hash = oauth_server::hash_token(&new_refresh);
         let expires_in: i64 = 3600;
-        let expires_at =
-            (chrono::Utc::now() + chrono::Duration::seconds(expires_in)).to_rfc3339();
+        let expires_at = (chrono::Utc::now() + chrono::Duration::seconds(expires_in)).to_rfc3339();
 
         McpClientRegistration::update_tokens(
             conn,

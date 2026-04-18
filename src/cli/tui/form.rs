@@ -7,7 +7,10 @@ use super::theme;
 pub enum FieldKind {
     Text,
     Masked,
-    Select { options: Vec<String>, selected: usize },
+    Select {
+        options: Vec<String>,
+        selected: usize,
+    },
 }
 
 #[derive(Clone)]
@@ -155,7 +158,8 @@ pub fn render(f: &mut Frame, area: Rect, state: &FormState) {
         let is_focused = i == state.focused;
         let label_style = theme::bold();
         let value_display = field.display_value();
-        let is_placeholder = field.value.is_empty() && !matches!(field.kind, FieldKind::Select { .. });
+        let is_placeholder =
+            field.value.is_empty() && !matches!(field.kind, FieldKind::Select { .. });
 
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
@@ -179,7 +183,14 @@ pub fn render(f: &mut Frame, area: Rect, state: &FormState) {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(prefix.to_string(), if is_focused { theme::accent() } else { Style::default() }),
+            Span::styled(
+                prefix.to_string(),
+                if is_focused {
+                    theme::accent()
+                } else {
+                    Style::default()
+                },
+            ),
             Span::styled(value_display, field_style),
             Span::styled(select_hint.to_string(), theme::dim()),
         ]));

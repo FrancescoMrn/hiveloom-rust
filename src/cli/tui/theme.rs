@@ -63,10 +63,7 @@ pub fn rounded_block(title: &str) -> Block<'_> {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(DIM))
-        .title(Span::styled(
-            format!(" {} ", title),
-            accent_bold(),
-        ))
+        .title(Span::styled(format!(" {} ", title), accent_bold()))
 }
 
 pub fn rounded_block_plain() -> Block<'static> {

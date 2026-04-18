@@ -9,13 +9,7 @@ pub struct ChatMessage {
     pub capabilities: Vec<String>,
 }
 
-pub fn render(
-    f: &mut Frame,
-    area: Rect,
-    messages: &[ChatMessage],
-    input: &str,
-    agent_name: &str,
-) {
+pub fn render(f: &mut Frame, area: Rect, messages: &[ChatMessage], input: &str, agent_name: &str) {
     // Split: messages area + input area
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -71,10 +65,7 @@ pub fn render(
     let display = if input.is_empty() {
         Line::from(Span::styled("  Type a message...", theme::dim()))
     } else {
-        Line::from(vec![
-            Span::styled("  ", Style::default()),
-            Span::raw(input),
-        ])
+        Line::from(vec![Span::styled("  ", Style::default()), Span::raw(input)])
     };
     let input_block = theme::rounded_block_plain();
     let input_widget = Paragraph::new(display).block(input_block);

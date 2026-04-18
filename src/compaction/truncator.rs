@@ -56,11 +56,7 @@ impl Truncator {
 
         // Protect the most recent N turns
         let total = turns.len();
-        let protected_start = if total > protected_turn_count {
-            total - protected_turn_count
-        } else {
-            0
-        };
+        let protected_start = total.saturating_sub(protected_turn_count);
 
         for i in protected_start..total {
             if !protected_indices.contains(&i) {
@@ -72,10 +68,11 @@ impl Truncator {
         // If a tool_result is in the protected window, also protect the preceding assistant turn
         let mut extra_protected = Vec::new();
         for &idx in &protected_indices {
-            if turns[idx].role == "tool_result" && idx > 0 {
-                if !protected_indices.contains(&(idx - 1)) {
-                    extra_protected.push(idx - 1);
-                }
+            if turns[idx].role == "tool_result"
+                && idx > 0
+                && !protected_indices.contains(&(idx - 1))
+            {
+                extra_protected.push(idx - 1);
             }
         }
         protected_indices.extend(extra_protected);

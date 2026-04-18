@@ -53,7 +53,10 @@ impl AcmeEnv {
 pub async fn run(args: TlsArgs) -> anyhow::Result<()> {
     match args.command {
         TlsCommand::Render(r) => {
-            print!("{}", render_caddyfile(&r.host, &r.email, r.acme_env, r.upstream_port));
+            print!(
+                "{}",
+                render_caddyfile(&r.host, &r.email, r.acme_env, r.upstream_port)
+            );
             Ok(())
         }
     }
@@ -99,7 +102,12 @@ mod tests {
 
     #[test]
     fn render_contains_host_and_email() {
-        let out = render_caddyfile("h.example.com", "ops@example.com", AcmeEnv::Production, 3000);
+        let out = render_caddyfile(
+            "h.example.com",
+            "ops@example.com",
+            AcmeEnv::Production,
+            3000,
+        );
         assert!(out.contains("h.example.com {"));
         assert!(out.contains("email ops@example.com"));
         assert!(out.contains("reverse_proxy 127.0.0.1:3000"));
@@ -108,7 +116,12 @@ mod tests {
 
     #[test]
     fn render_uses_production_acme_by_default() {
-        let out = render_caddyfile("h.example.com", "ops@example.com", AcmeEnv::Production, 3000);
+        let out = render_caddyfile(
+            "h.example.com",
+            "ops@example.com",
+            AcmeEnv::Production,
+            3000,
+        );
         assert!(out.contains("acme-v02.api.letsencrypt.org"));
         assert!(!out.contains("acme-staging"));
     }
@@ -121,7 +134,12 @@ mod tests {
 
     #[test]
     fn render_honors_custom_upstream_port() {
-        let out = render_caddyfile("h.example.com", "ops@example.com", AcmeEnv::Production, 8080);
+        let out = render_caddyfile(
+            "h.example.com",
+            "ops@example.com",
+            AcmeEnv::Production,
+            8080,
+        );
         assert!(out.contains("reverse_proxy 127.0.0.1:8080"));
     }
 }

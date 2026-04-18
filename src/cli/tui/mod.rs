@@ -1,9 +1,9 @@
-pub mod theme;
-pub mod status_bar;
-pub mod menu;
+pub mod chat_view;
+pub mod command_bar;
 pub mod context_panel;
 pub mod form;
+pub mod menu;
 pub mod popup;
-pub mod command_bar;
-pub mod chat_view;
+pub mod status_bar;
+pub mod theme;
 pub mod wizard;

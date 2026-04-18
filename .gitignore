@@ -4,9 +4,6 @@ target/
 *.rlib
 *.prof*
 
-# Release artifacts (built by scripts/release.sh, uploaded to R2)
-/dist/
-
 # IDE
 .idea/
 .vscode/
@@ -29,3 +26,11 @@ Thumbs.db
 # Temporary
 *.tmp
 *.swp
+
+# SpecKit tooling and generated context — source of truth lives in hiveloom-cloud.
+# `specs/` is a symlink into ../hiveloom-cloud/oss/specs for local dev; the
+# canonical specs are committed there, not here.
+.claude/
+.specify/
+CLAUDE.md
+/specs

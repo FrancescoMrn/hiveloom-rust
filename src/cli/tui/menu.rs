@@ -37,7 +37,14 @@ pub fn render(f: &mut Frame, area: Rect, items: &[MenuItem], selected: usize) {
         };
 
         let mut spans = vec![
-            Span::styled(cursor.content.to_string(), if is_selected { theme::accent() } else { Style::default() }),
+            Span::styled(
+                cursor.content.to_string(),
+                if is_selected {
+                    theme::accent()
+                } else {
+                    Style::default()
+                },
+            ),
             Span::styled(format!("{:<16}", item.label), label_style),
             Span::styled(&item.description, desc_style),
         ];

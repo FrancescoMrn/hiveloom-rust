@@ -4,7 +4,10 @@ use super::theme;
 
 pub fn render_step_indicator(f: &mut Frame, area: Rect, current: usize, total: usize, title: &str) {
     let mut spans = vec![
-        Span::styled(format!("  Step {} of {} ", current + 1, total), theme::bold()),
+        Span::styled(
+            format!("  Step {} of {} ", current + 1, total),
+            theme::bold(),
+        ),
         Span::styled("── ", theme::dim()),
     ];
 

@@ -104,7 +104,11 @@ pub async fn run(args: McpIdentityArgs) -> anyhow::Result<()> {
             let result: serde_json::Value = client
                 .post(&format!("/api/tenants/{}/mcp-identities", tenant), &body)
                 .await?;
-            let identity_id = result.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let identity_id = result
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
 
             // Immediately issue a setup code so users have everything they need
             let setup = client
@@ -143,7 +147,9 @@ pub async fn run(args: McpIdentityArgs) -> anyhow::Result<()> {
                             println!("  MCP URL:     {}/mcp/{}/<agent-slug>", endpoint, tenant);
                         }
                         println!();
-                        println!("  Add the URL to your MCP client (Claude Desktop, Cursor, etc.).");
+                        println!(
+                            "  Add the URL to your MCP client (Claude Desktop, Cursor, etc.)."
+                        );
                         println!("  Enter the setup code in the browser when prompted.");
                     }
                 }

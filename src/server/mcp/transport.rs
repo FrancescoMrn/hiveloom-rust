@@ -95,11 +95,9 @@ pub async fn handle_mcp_request(
 
     // Handle stateless methods that don't need DB
     if rpc_req.method == "ping" {
-        return Ok(Json(JsonRpcResponse::success(
-            rpc_req.id,
-            serde_json::json!({}),
-        ))
-        .into_response());
+        return Ok(
+            Json(JsonRpcResponse::success(rpc_req.id, serde_json::json!({}))).into_response(),
+        );
     }
 
     // Check if this is a chat tool call that needs SSE streaming
@@ -130,8 +128,7 @@ pub async fn handle_mcp_request(
         )
     })
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .map_err(|status| status)?;
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
 
     Ok(Json(response).into_response())
 }
@@ -414,7 +411,7 @@ async fn handle_chat_sse(
                 let rpc_response = JsonRpcResponse::success(rpc_id_for_stream, result);
                 Event::default()
                     .json_data(&rpc_response)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                    .map_err(std::io::Error::other)
             }
             Err((_code, err_msg)) => {
                 // Return a graceful error as a chat response, not a JSON-RPC error
@@ -427,7 +424,7 @@ async fn handle_chat_sse(
                 tracing::error!(error = %err_msg, "Chat tool error");
                 Event::default()
                     .json_data(&rpc_response)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                    .map_err(std::io::Error::other)
             }
         }
     });
@@ -455,9 +452,12 @@ fn handle_chat_blocking(
             .ok_or_else(|| (INTERNAL_ERROR, "Tenant not found".to_string()))?
     };
 
-    let tenant_store = state
-        .open_tenant_store(&tenant.id)
-        .map_err(|e| (INTERNAL_ERROR, format!("Failed to open tenant store: {}", e)))?;
+    let tenant_store = state.open_tenant_store(&tenant.id).map_err(|e| {
+        (
+            INTERNAL_ERROR,
+            format!("Failed to open tenant store: {}", e),
+        )
+    })?;
     let conn = tenant_store.conn();
 
     // Validate session
@@ -487,8 +487,12 @@ fn handle_chat_blocking(
     )?;
 
     // Load capabilities for the agent loop
-    let capabilities = Capability::list_by_agent(conn, agent.tenant_id, agent.id)
-        .map_err(|e| (INTERNAL_ERROR, format!("Failed to load capabilities: {}", e)))?;
+    let capabilities = Capability::list_by_agent(conn, agent.tenant_id, agent.id).map_err(|e| {
+        (
+            INTERNAL_ERROR,
+            format!("Failed to load capabilities: {}", e),
+        )
+    })?;
 
     // Resolve LLM credential
     let credential_name = if agent.model_id.starts_with("claude-") {
@@ -497,25 +501,44 @@ fn handle_chat_blocking(
         "openai"
     };
     let api_key = {
-        let entry =
-            crate::store::models::CredentialVaultEntry::get_by_name(conn, tenant.id, credential_name, None)
-                .map_err(|e| (INTERNAL_ERROR, format!("Failed to resolve LLM credential: {}", e)))?
-                .ok_or_else(|| {
-                    (
-                        INTERNAL_ERROR,
-                        format!("No LLM credential '{}' found for tenant", credential_name),
-                    )
-                })?;
-        let decrypted = state
-            .vault
-            .decrypt(&entry.encrypted_value)
-            .map_err(|e| (INTERNAL_ERROR, format!("Failed to decrypt credential: {}", e)))?;
-        String::from_utf8(decrypted)
-            .map_err(|e| (INTERNAL_ERROR, format!("Invalid credential encoding: {}", e)))?
+        let entry = crate::store::models::CredentialVaultEntry::get_by_name(
+            conn,
+            tenant.id,
+            credential_name,
+            None,
+        )
+        .map_err(|e| {
+            (
+                INTERNAL_ERROR,
+                format!("Failed to resolve LLM credential: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                INTERNAL_ERROR,
+                format!("No LLM credential '{}' found for tenant", credential_name),
+            )
+        })?;
+        let decrypted = state.vault.decrypt(&entry.encrypted_value).map_err(|e| {
+            (
+                INTERNAL_ERROR,
+                format!("Failed to decrypt credential: {}", e),
+            )
+        })?;
+        String::from_utf8(decrypted).map_err(|e| {
+            (
+                INTERNAL_ERROR,
+                format!("Invalid credential encoding: {}", e),
+            )
+        })?
     };
 
-    let provider = crate::llm::resolve_provider(&agent.model_id, &api_key)
-        .map_err(|e| (INTERNAL_ERROR, format!("Failed to resolve LLM provider: {}", e)))?;
+    let provider = crate::llm::resolve_provider(&agent.model_id, &api_key).map_err(|e| {
+        (
+            INTERNAL_ERROR,
+            format!("Failed to resolve LLM provider: {}", e),
+        )
+    })?;
 
     let invocation = AgentInvocation {
         agent: agent.clone(),
@@ -575,7 +598,12 @@ fn resolve_conversation(
         user_identity,
         None,
     )
-    .map_err(|e| (INTERNAL_ERROR, format!("Failed to create conversation: {}", e)))
+    .map_err(|e| {
+        (
+            INTERNAL_ERROR,
+            format!("Failed to create conversation: {}", e),
+        )
+    })
 }
 
 // ── memory tool ─────────────────────────────────────────────────────────

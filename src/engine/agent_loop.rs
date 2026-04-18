@@ -43,7 +43,8 @@ pub async fn run_agent_loop(
     )?;
 
     // 3. T019: Pre-LLM-call compaction check
-    let system_context = build_system_context(&invocation.agent, &memories, &invocation.capabilities);
+    let system_context =
+        build_system_context(&invocation.agent, &memories, &invocation.capabilities);
     let compaction_outcome = CompactionEngine::check_and_compact(
         conn,
         provider,
@@ -211,7 +212,8 @@ pub async fn run_agent_loop_with_vault(
     )?;
 
     // 3. T019: Pre-LLM-call compaction check (vault-enabled loop)
-    let system_context = build_system_context(&invocation.agent, &memories, &invocation.capabilities);
+    let system_context =
+        build_system_context(&invocation.agent, &memories, &invocation.capabilities);
     let compaction_outcome = CompactionEngine::check_and_compact(
         conn,
         provider,

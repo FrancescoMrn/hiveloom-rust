@@ -65,10 +65,7 @@ pub async fn run(args: ChatArgs) -> anyhow::Result<()> {
         }
 
         match client
-            .post::<_, ChatResponse>(
-                &format!("/api/tenants/{tid}/agents/{agent}/chat"),
-                &body,
-            )
+            .post::<_, ChatResponse>(&format!("/api/tenants/{tid}/agents/{agent}/chat"), &body)
             .await
         {
             Ok(resp) => {

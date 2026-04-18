@@ -33,7 +33,9 @@ pub async fn chat_with_agent(
     };
     let tenant_store = match state.open_tenant_store(&tid) {
         Ok(s) => s,
-        Err(e) => return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response(),
+        Err(e) => {
+            return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
+        }
     };
     let aid = match super::resolve_agent_id(&tenant_store, tid, &aid_str) {
         Ok(id) => id,
@@ -75,8 +77,7 @@ pub async fn chat_with_agent(
                 }
             },
             Err(e) => {
-                return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())
-                    .into_response()
+                return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
             }
         },
         Ok(None) => {
@@ -101,18 +102,13 @@ pub async fn chat_with_agent(
     };
 
     // Resolve or create conversation
-    let conversation = match resolve_cli_conversation(
-        conn,
-        tid,
-        aid,
-        "admin",
-        body.conversation_id.as_deref(),
-    ) {
-        Ok(c) => c,
-        Err(e) => {
-            return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
-        }
-    };
+    let conversation =
+        match resolve_cli_conversation(conn, tid, aid, "admin", body.conversation_id.as_deref()) {
+            Ok(c) => c,
+            Err(e) => {
+                return err_json(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()).into_response()
+            }
+        };
 
     let invocation = AgentInvocation {
         agent: agent.clone(),

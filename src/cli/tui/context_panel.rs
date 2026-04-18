@@ -46,10 +46,7 @@ pub fn render(
     }
 
     if rows.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "    (none)",
-            theme::dim(),
-        )));
+        lines.push(Line::from(Span::styled("    (none)", theme::dim())));
     }
 
     // Footer hint

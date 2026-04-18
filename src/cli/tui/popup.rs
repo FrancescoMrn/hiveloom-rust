@@ -8,13 +8,7 @@ pub struct PopupItem {
     pub dangerous: bool,
 }
 
-pub fn render(
-    f: &mut Frame,
-    anchor_y: u16,
-    anchor_x: u16,
-    items: &[PopupItem],
-    selected: usize,
-) {
+pub fn render(f: &mut Frame, anchor_y: u16, anchor_x: u16, items: &[PopupItem], selected: usize) {
     let width = items.iter().map(|i| i.label.len()).max().unwrap_or(10) + 8;
     let height = items.len() as u16 + 2; // +2 for border
     let term_h = f.size().height;
@@ -54,11 +48,22 @@ pub fn render(
             Style::default()
         };
 
-        let bg = if is_selected { theme::focused() } else { Style::default() };
+        let bg = if is_selected {
+            theme::focused()
+        } else {
+            Style::default()
+        };
 
         lines.push(
             Line::from(vec![
-                Span::styled(cursor, if is_selected { theme::accent() } else { Style::default() }),
+                Span::styled(
+                    cursor,
+                    if is_selected {
+                        theme::accent()
+                    } else {
+                        Style::default()
+                    },
+                ),
                 Span::styled(item.label.clone(), label_style),
             ])
             .style(bg),
