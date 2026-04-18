@@ -24,6 +24,7 @@ jobs:
   release:
     name: build linux targets and upload to R2
     runs-on: ubuntu-latest
+    environment: Production
     steps:
       - uses: actions/checkout@v4
 
