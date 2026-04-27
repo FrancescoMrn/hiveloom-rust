@@ -2,6 +2,30 @@
 
 All notable changes to Hiveloom are documented in this file.
 
+## [0.2.0] - 2026-04-27
+
+### Added
+
+- Routed scheduled jobs and inbound event subscriptions through the real agent loop so automations can use the same memory, skills, tools, and persistence path as chat.
+- Added guarded autonomous memory curation with configurable cadence through `HIVELOOM_MEMORY_CURATION_INTERVAL_TURNS`.
+- Added progressive markdown skill loading: prompts include skill summaries by default, and full markdown skill bodies load on demand through the internal `hiveloom_load_skill` tool.
+- Added OpenAI-compatible endpoint support through `HIVELOOM_OPENAI_BASE_URL` and `HIVELOOM_OPENAI_COMPAT_BASE_URL`.
+- Added CLI support for replacing markdown capability content with `hiveloom capability edit --from-file`.
+
+### Changed
+
+- Improved Anthropic message handling by merging multiple system messages and mapping unknown roles into user messages for API compatibility.
+- Replayed persisted tool results as user-visible context so continued sessions keep important tool output.
+- Started the scheduler from `hiveloom serve` by default, with `--no-scheduler` available for deployments that need to disable it.
+- Normalized CLI help text for agent references to clarify that agent IDs or names are accepted.
+- Updated the README quick start to match the current credential and agent creation commands.
+
+### Fixed
+
+- Fixed capability `show`, `edit`, and `remove` so the CLI can use either capability IDs or names while the server resolves them within the selected agent scope.
+- Preserved existing capability schemas and markdown bodies when editing only selected fields.
+- Routed Slack events through the vault-backed agent loop instead of a separate response path.
+
 ## [0.1.1] - 2026-04-18
 
 ### Added
