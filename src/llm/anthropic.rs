@@ -226,10 +226,8 @@ mod tests {
     #[test]
     fn maps_unknown_roles_to_user_messages() {
         let provider = AnthropicProvider::new("test-key".to_string(), "claude-test".to_string());
-        let body = provider.build_request_body(
-            &[Message::text("tool_result", "{\"ok\":true}")],
-            &[],
-        );
+        let body =
+            provider.build_request_body(&[Message::text("tool_result", "{\"ok\":true}")], &[]);
 
         assert_eq!(body["messages"][0]["role"], "user");
         assert_eq!(

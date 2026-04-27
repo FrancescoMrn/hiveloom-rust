@@ -140,10 +140,7 @@ impl Summarizer {
 
         // T014: Re-prompt once with tighter constraint
         let retry_messages = vec![
-            Message::text(
-                "system",
-                "You are a precise context compaction assistant.",
-            ),
+            Message::text("system", "You are a precise context compaction assistant."),
             Message::text(
                 "user",
                 format!(
