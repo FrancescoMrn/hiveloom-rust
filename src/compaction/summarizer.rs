@@ -91,16 +91,12 @@ impl Summarizer {
         );
 
         vec![
-            Message {
-                role: "system".to_string(),
-                content: "You are a precise context compaction assistant. Produce structured \
-                         summaries that preserve all critical information in minimal tokens."
-                    .to_string(),
-            },
-            Message {
-                role: "user".to_string(),
-                content: prompt,
-            },
+            Message::text(
+                "system",
+                "You are a precise context compaction assistant. Produce structured \
+                 summaries that preserve all critical information in minimal tokens.",
+            ),
+            Message::text("user", prompt),
         ]
     }
 
@@ -144,19 +140,19 @@ impl Summarizer {
 
         // T014: Re-prompt once with tighter constraint
         let retry_messages = vec![
-            Message {
-                role: "system".to_string(),
-                content: "You are a precise context compaction assistant.".to_string(),
-            },
-            Message {
-                role: "user".to_string(),
-                content: format!(
+            Message::text(
+                "system",
+                "You are a precise context compaction assistant.",
+            ),
+            Message::text(
+                "user",
+                format!(
                     "The following summary is too long ({} tokens). Compress it further \
                      to at most {} tokens while preserving all critical facts, especially \
                      specific values (IDs, names, numbers) and workflow state.\n\n{}",
                     token_count, max_summary_tokens, summary
                 ),
-            },
+            ),
         ];
 
         let retry_response = provider.chat_complete(&retry_messages, &[]).await?;

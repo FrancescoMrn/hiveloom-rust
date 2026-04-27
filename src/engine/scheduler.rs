@@ -2,14 +2,13 @@ use chrono::{DateTime, Utc};
 use cron::Schedule;
 use std::collections::HashSet;
 use std::str::FromStr;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 use crate::compaction::engine::cleanup_expired_archives;
 use crate::compaction::event::CompactionEvent;
-use crate::store::models::{Agent, Capability, Conversation, ScheduledJob};
-use crate::store::TenantStore;
+use crate::store::models::{Agent, Capability, Conversation, CredentialVaultEntry, ScheduledJob};
+use crate::store::{TenantStore, Vault};
 
 pub struct JobScheduler {
     data_dir: String,
@@ -98,7 +97,10 @@ impl JobScheduler {
                 for job in due_jobs {
                     // T058: check per-agent concurrency
                     {
-                        let mut running = self.running_agents.lock().await;
+                        let mut running = self
+                            .running_agents
+                            .lock()
+                            .map_err(|e| anyhow::anyhow!("scheduler lock poisoned: {}", e))?;
                         if running.contains(&job.agent_id) {
                             tracing::debug!(
                                 agent_id = %job.agent_id,
@@ -152,8 +154,11 @@ impl JobScheduler {
                             );
                         }
                         // Remove agent from running set
-                        let mut running = running_agents.lock().await;
-                        running.remove(&job_clone.agent_id);
+                        if let Ok(mut running) = running_agents.lock() {
+                            running.remove(&job_clone.agent_id);
+                        } else {
+                            tracing::error!("Scheduler lock poisoned while clearing running agent");
+                        }
                     });
                 }
 
@@ -269,57 +274,81 @@ async fn fire_job(data_dir: &str, job: &ScheduledJob, tenant_id: &Uuid) -> anyho
         "Firing scheduled job"
     );
 
-    let store = TenantStore::open(std::path::Path::new(data_dir), tenant_id)?;
-    let conn = store.conn();
+    let data_dir = data_dir.to_string();
+    let job = job.clone();
+    let tenant_id = *tenant_id;
 
-    // Load agent
-    let agent = Agent::get_current(conn, *tenant_id, job.agent_id)?
-        .ok_or_else(|| anyhow::anyhow!("Agent {} not found", job.agent_id))?;
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let data_path = std::path::Path::new(&data_dir);
+        let store = TenantStore::open(data_path, &tenant_id)?;
+        let conn = store.conn();
+        let vault = Vault::open(data_path)?;
 
-    // Load capabilities
-    let capabilities = Capability::list_by_agent(conn, *tenant_id, job.agent_id)?;
+        let agent = Agent::get_current(conn, tenant_id, job.agent_id)?
+            .ok_or_else(|| anyhow::anyhow!("Agent {} not found", job.agent_id))?;
+        if agent.status != "active" {
+            tracing::debug!(
+                job_id = %job.id,
+                agent_id = %job.agent_id,
+                "Skipping scheduled job for inactive agent"
+            );
+            return Ok(());
+        }
 
-    // T061: Create a synthetic internal conversation for the autonomous run
-    let conversation = Conversation::create(
-        conn,
-        *tenant_id,
-        job.agent_id,
-        "internal",                           // surface_type
-        &format!("scheduled-job:{}", job.id), // surface_ref
-        "system",                             // user_identity
-        None,                                 // thread_ref
-    )?;
+        let capabilities = Capability::list_by_agent(conn, tenant_id, job.agent_id)?;
+        let conversation = Conversation::create(
+            conn,
+            tenant_id,
+            job.agent_id,
+            "internal",
+            &format!("scheduled-job:{}", job.id),
+            "system",
+            None,
+        )?;
 
-    // Build initial context message
-    let initial_message = if job.initial_context.is_empty() {
-        "You are running as a scheduled autonomous agent. Execute your configured tasks."
-            .to_string()
-    } else {
-        job.initial_context.clone()
-    };
+        let initial_message = if job.initial_context.is_empty() {
+            "You are running as a scheduled autonomous agent. Execute your configured tasks."
+                .to_string()
+        } else {
+            job.initial_context.clone()
+        };
 
-    // Run the agent loop (without vault for now — the basic loop)
-    let invocation = crate::engine::AgentInvocation {
-        agent,
-        capabilities,
-        conversation_id: conversation.id,
-        tenant_id: *tenant_id,
-        user_identity: "system".to_string(),
-    };
+        let credential_name = if agent.model_id.starts_with("claude-") {
+            "anthropic"
+        } else {
+            "openai"
+        };
+        let credential = CredentialVaultEntry::get_by_name(conn, tenant_id, credential_name, None)?
+            .ok_or_else(|| anyhow::anyhow!("No LLM credential '{}' found", credential_name))?;
+        let api_key = String::from_utf8(vault.decrypt(&credential.encrypted_value)?)?;
+        let provider = crate::llm::resolve_provider(&agent.model_id, &api_key)?;
 
-    // Use the basic agent loop (vault-less) for scheduled runs
-    // In production, the LLM provider would be configured via app state
-    // For now, we log that the job was dispatched
-    tracing::info!(
-        job_id = %job.id,
-        conversation_id = %conversation.id,
-        initial_message = %initial_message,
-        "Scheduled job created conversation (invocation = {:?})",
-        invocation.conversation_id,
-    );
+        let invocation = crate::engine::AgentInvocation {
+            agent,
+            capabilities,
+            conversation_id: conversation.id,
+            tenant_id,
+            user_identity: "system".to_string(),
+        };
 
-    // Conclude the conversation after the run
-    Conversation::update_status(conn, conversation.id, "concluded")?;
+        let rt = tokio::runtime::Handle::current();
+        let result = rt.block_on(crate::engine::agent_loop::run_agent_loop_with_vault(
+            &invocation,
+            provider.as_ref(),
+            conn,
+            &initial_message,
+            &vault,
+        ))?;
 
-    Ok(())
+        tracing::info!(
+            job_id = %job.id,
+            conversation_id = %conversation.id,
+            tool_calls = ?result.tool_calls_made,
+            "Scheduled job completed through agent loop"
+        );
+
+        Conversation::update_status(conn, conversation.id, "concluded")?;
+        Ok(())
+    })
+    .await?
 }

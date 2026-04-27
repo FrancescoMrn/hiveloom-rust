@@ -25,24 +25,71 @@ impl AnthropicProvider {
     /// Convert our generic messages into the Anthropic API format.
     ///
     /// The system prompt is extracted and returned separately; the remaining
-    /// messages are returned as the `messages` array.
+    /// messages are returned as the `messages` array. Tool round-trips are
+    /// emitted as native `tool_use` / `tool_result` content blocks so the
+    /// model can thread them rather than treating them as plain text.
     fn build_request_body(
         &self,
         messages: &[Message],
         tools: &[ToolDefinition],
     ) -> serde_json::Value {
-        let mut system_prompt: Option<String> = None;
+        let mut system_parts: Vec<String> = Vec::new();
         let mut api_messages: Vec<serde_json::Value> = Vec::new();
 
         for msg in messages {
+            // Anthropic expects the system prompt as a top-level field.
             if msg.role == "system" {
-                // Anthropic expects the system prompt as a top-level field
-                system_prompt = Some(msg.content.clone());
-            } else {
+                system_parts.push(msg.content.clone());
+                continue;
+            }
+
+            // Tool result: emit a user message with a tool_result content block.
+            if let Some(tr) = &msg.tool_result {
                 api_messages.push(json!({
-                    "role": msg.role,
-                    "content": msg.content,
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tr.tool_use_id,
+                        "content": tr.content,
+                    }],
                 }));
+                continue;
+            }
+
+            // Assistant turn carrying tool_use blocks (with optional accompanying text).
+            if msg.role == "assistant" && !msg.tool_calls.is_empty() {
+                let mut blocks: Vec<serde_json::Value> = Vec::new();
+                if !msg.content.is_empty() {
+                    blocks.push(json!({"type": "text", "text": msg.content}));
+                }
+                for tc in &msg.tool_calls {
+                    blocks.push(json!({
+                        "type": "tool_use",
+                        "id": tc.id,
+                        "name": tc.name,
+                        "input": tc.arguments,
+                    }));
+                }
+                api_messages.push(json!({
+                    "role": "assistant",
+                    "content": blocks,
+                }));
+                continue;
+            }
+
+            match msg.role.as_str() {
+                "user" | "assistant" => {
+                    api_messages.push(json!({
+                        "role": msg.role,
+                        "content": msg.content,
+                    }));
+                }
+                other => {
+                    api_messages.push(json!({
+                        "role": "user",
+                        "content": format!("[{}]\n{}", other, msg.content),
+                    }));
+                }
             }
         }
 
@@ -52,8 +99,8 @@ impl AnthropicProvider {
             "messages": api_messages,
         });
 
-        if let Some(sys) = system_prompt {
-            body["system"] = json!(sys);
+        if !system_parts.is_empty() {
+            body["system"] = json!(system_parts.join("\n\n"));
         }
 
         if !tools.is_empty() {
@@ -152,5 +199,104 @@ impl LlmProvider for AnthropicProvider {
 
     fn model_name(&self) -> &str {
         &self.model
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn combines_multiple_system_messages() {
+        let provider = AnthropicProvider::new("test-key".to_string(), "claude-test".to_string());
+        let body = provider.build_request_body(
+            &[
+                Message::text("system", "base prompt"),
+                Message::text("system", "compaction summary"),
+                Message::text("user", "hello"),
+            ],
+            &[],
+        );
+
+        let system = body["system"].as_str().unwrap();
+        assert!(system.contains("base prompt"));
+        assert!(system.contains("compaction summary"));
+    }
+
+    #[test]
+    fn maps_unknown_roles_to_user_messages() {
+        let provider = AnthropicProvider::new("test-key".to_string(), "claude-test".to_string());
+        let body = provider.build_request_body(
+            &[Message::text("tool_result", "{\"ok\":true}")],
+            &[],
+        );
+
+        assert_eq!(body["messages"][0]["role"], "user");
+        assert_eq!(
+            body["messages"][0]["content"],
+            "[tool_result]\n{\"ok\":true}"
+        );
+    }
+
+    #[test]
+    fn emits_tool_use_and_tool_result_content_blocks() {
+        let provider = AnthropicProvider::new("test-key".to_string(), "claude-test".to_string());
+        let tool_call = ToolCall {
+            id: "toolu_01abc".to_string(),
+            name: "lookup".to_string(),
+            arguments: json!({"q": "ping"}),
+        };
+        let body = provider.build_request_body(
+            &[
+                Message::text("user", "look it up"),
+                Message::assistant_with_tools("on it", vec![tool_call.clone()]),
+                Message::tool_result(&tool_call.id, "{\"answer\":\"pong\"}"),
+            ],
+            &[],
+        );
+
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+
+        // Plain user message keeps its string content.
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], "look it up");
+
+        // Assistant turn becomes structured blocks: text + tool_use.
+        assert_eq!(messages[1]["role"], "assistant");
+        let blocks = messages[1]["content"].as_array().unwrap();
+        assert_eq!(blocks[0]["type"], "text");
+        assert_eq!(blocks[0]["text"], "on it");
+        assert_eq!(blocks[1]["type"], "tool_use");
+        assert_eq!(blocks[1]["id"], "toolu_01abc");
+        assert_eq!(blocks[1]["name"], "lookup");
+        assert_eq!(blocks[1]["input"]["q"], "ping");
+
+        // Tool result becomes a user message with a single tool_result block.
+        assert_eq!(messages[2]["role"], "user");
+        let result_blocks = messages[2]["content"].as_array().unwrap();
+        assert_eq!(result_blocks[0]["type"], "tool_result");
+        assert_eq!(result_blocks[0]["tool_use_id"], "toolu_01abc");
+        assert_eq!(result_blocks[0]["content"], "{\"answer\":\"pong\"}");
+    }
+
+    #[test]
+    fn assistant_tool_use_without_text_omits_the_text_block() {
+        let provider = AnthropicProvider::new("test-key".to_string(), "claude-test".to_string());
+        let body = provider.build_request_body(
+            &[Message::assistant_with_tools(
+                "",
+                vec![ToolCall {
+                    id: "toolu_silent".to_string(),
+                    name: "ping".to_string(),
+                    arguments: json!({}),
+                }],
+            )],
+            &[],
+        );
+
+        let blocks = body["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "tool_use");
     }
 }

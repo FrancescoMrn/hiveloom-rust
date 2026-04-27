@@ -62,25 +62,19 @@ impl CompactionEngine {
         }
 
         // Build messages to count total tokens
-        let mut messages = vec![Message {
-            role: "system".to_string(),
-            content: system_prompt.to_string(),
-        }];
+        let mut messages = vec![Message::text("system", system_prompt)];
 
         // T021: If there's an existing compacted summary, include it
         let existing_summary = get_compacted_summary(conn, conversation_id)?;
         if let Some(ref summary) = existing_summary {
-            messages.push(Message {
-                role: "system".to_string(),
-                content: format!("[Previous context summary]\n{}", summary),
-            });
+            messages.push(Message::text(
+                "system",
+                format!("[Previous context summary]\n{}", summary),
+            ));
         }
 
         for turn in &turns {
-            messages.push(Message {
-                role: turn.role.clone(),
-                content: turn.content.clone(),
-            });
+            messages.push(Message::text(turn.role.clone(), turn.content.clone()));
         }
 
         let total_tokens = counter.count_messages(&messages);
@@ -401,20 +395,11 @@ fn calculate_tokens_after(
 ) -> Result<usize> {
     let remaining_turns = ConversationTurn::list_by_conversation(conn, conversation_id)?;
     let mut messages = vec![
-        Message {
-            role: "system".to_string(),
-            content: system_prompt.to_string(),
-        },
-        Message {
-            role: "system".to_string(),
-            content: format!("[Previous context summary]\n{}", summary),
-        },
+        Message::text("system", system_prompt),
+        Message::text("system", format!("[Previous context summary]\n{}", summary)),
     ];
     for turn in &remaining_turns {
-        messages.push(Message {
-            role: turn.role.clone(),
-            content: turn.content.clone(),
-        });
+        messages.push(Message::text(turn.role.clone(), turn.content.clone()));
     }
     Ok(counter.count_messages(&messages))
 }

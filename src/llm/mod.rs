@@ -4,16 +4,18 @@ pub mod provider;
 
 pub use anthropic::AnthropicProvider;
 pub use openai::OpenAiProvider;
-pub use provider::{LlmProvider, LlmResponse, Message, TokenUsage, ToolCall, ToolDefinition};
+pub use provider::{
+    LlmProvider, LlmResponse, Message, TokenUsage, ToolCall, ToolDefinition, ToolResult,
+};
 
 /// Resolve a provider implementation from a model identifier and API key.
 ///
 /// - Model IDs starting with `claude-` use the Anthropic Messages API.
 /// - Model IDs starting with `gpt-`, `o1-`, or `o3-` use the OpenAI Chat
-///   Completions API at the default base URL.
-/// - All other model IDs fall through to OpenAI-compatible mode (default base
-///   URL), which works for any API that implements the OpenAI chat completions
-///   contract (e.g. vLLM, Ollama, Together AI).
+///   Completions API.
+/// - All other model IDs fall through to OpenAI-compatible mode, which works
+///   for APIs that implement the OpenAI chat completions contract.
+/// - `HIVELOOM_OPENAI_BASE_URL` overrides the OpenAI-compatible endpoint.
 pub fn resolve_provider(
     model_id: &str,
     api_key: &str,
@@ -25,10 +27,13 @@ pub fn resolve_provider(
         )))
     } else {
         // gpt-*, o1-*, o3-*, or any OpenAI-compatible model
+        let base_url = std::env::var("HIVELOOM_OPENAI_BASE_URL")
+            .ok()
+            .or_else(|| std::env::var("HIVELOOM_OPENAI_COMPAT_BASE_URL").ok());
         Ok(Box::new(OpenAiProvider::new(
             api_key.to_string(),
             model_id.to_string(),
-            None,
+            base_url,
         )))
     }
 }

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::engine::agent_loop::{run_agent_loop, AgentInvocation};
+use crate::engine::agent_loop::{run_agent_loop_with_vault, AgentInvocation};
 use crate::store::models::{
     Agent, Capability, ChatSurfaceBinding, Conversation, CredentialVaultEntry, Tenant,
 };
@@ -197,14 +197,16 @@ pub async fn dispatch_event(
             let tenant_store =
                 crate::store::TenantStore::open(std::path::Path::new(&data_dir2), &tenant_id)?;
             let conn = tenant_store.conn();
+            let vault = crate::store::Vault::open(std::path::Path::new(&data_dir2))?;
 
             // We need a runtime handle to run async LLM calls inside spawn_blocking
             let rt = tokio::runtime::Handle::current();
-            rt.block_on(run_agent_loop(
+            rt.block_on(run_agent_loop_with_vault(
                 &invocation,
                 provider.as_ref(),
                 conn,
                 &text_clone,
+                &vault,
             ))
         })
         .await??;

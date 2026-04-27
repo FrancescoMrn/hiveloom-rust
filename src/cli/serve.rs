@@ -11,6 +11,9 @@ pub struct ServeArgs {
     /// Path to data directory
     #[arg(long, env = "HIVELOOM_DATA_DIR", default_value_t = crate::cli::local::default_data_dir())]
     pub data_dir: String,
+    /// Disable the background scheduler loop
+    #[arg(long, default_value_t = false)]
+    pub no_scheduler: bool,
 }
 
 pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
@@ -25,6 +28,16 @@ pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
 
     // FR-032/FR-033: Auto-provision default tenant on first run
     app_state.platform_store.ensure_default_tenant()?;
+
+    if !args.no_scheduler {
+        let scheduler_data_dir = args.data_dir.clone();
+        tokio::spawn(async move {
+            let scheduler = crate::engine::JobScheduler::new(&scheduler_data_dir);
+            if let Err(e) = scheduler.run().await {
+                tracing::error!(error = %e, "Scheduler stopped");
+            }
+        });
+    }
 
     let router = crate::server::create_router(app_state);
 

@@ -15,11 +15,15 @@ pub struct OpenAiProvider {
 
 impl OpenAiProvider {
     pub fn new(api_key: String, model: String, base_url: Option<String>) -> Self {
+        let base_url = base_url
+            .map(|url| url.trim().trim_end_matches('/').to_string())
+            .filter(|url| !url.is_empty())
+            .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
         Self {
             client: reqwest::Client::new(),
             api_key,
             model,
-            base_url: base_url.unwrap_or_else(|| DEFAULT_BASE_URL.to_string()),
+            base_url,
         }
     }
 
@@ -31,6 +35,43 @@ impl OpenAiProvider {
         let api_messages: Vec<serde_json::Value> = messages
             .iter()
             .map(|m| {
+                // Tool result: must be `role: tool` with `tool_call_id`.
+                if let Some(tr) = &m.tool_result {
+                    return json!({
+                        "role": "tool",
+                        "tool_call_id": tr.tool_use_id,
+                        "content": tr.content,
+                    });
+                }
+                // Assistant turn carrying tool calls: emit a `tool_calls`
+                // array; OpenAI requires arguments as a JSON-encoded string.
+                if m.role == "assistant" && !m.tool_calls.is_empty() {
+                    let calls: Vec<serde_json::Value> = m
+                        .tool_calls
+                        .iter()
+                        .map(|tc| {
+                            json!({
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.name,
+                                    "arguments": serde_json::to_string(&tc.arguments)
+                                        .unwrap_or_else(|_| "{}".to_string()),
+                                },
+                            })
+                        })
+                        .collect();
+                    let content = if m.content.is_empty() {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::Value::String(m.content.clone())
+                    };
+                    return json!({
+                        "role": "assistant",
+                        "content": content,
+                        "tool_calls": calls,
+                    });
+                }
                 json!({
                     "role": m.role,
                     "content": m.content,
@@ -136,5 +177,84 @@ impl LlmProvider for OpenAiProvider {
 
     fn model_name(&self) -> &str {
         &self.model
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trims_custom_base_url_or_uses_default() {
+        let default_provider = OpenAiProvider::new("key".into(), "gpt-test".into(), None);
+        assert_eq!(default_provider.base_url, DEFAULT_BASE_URL);
+
+        let custom_provider = OpenAiProvider::new(
+            "key".into(),
+            "local-model".into(),
+            Some(" https://llm.example.test/v1/ ".into()),
+        );
+        assert_eq!(custom_provider.base_url, "https://llm.example.test/v1");
+    }
+
+    #[test]
+    fn emits_tool_calls_array_and_role_tool_messages() {
+        let provider = OpenAiProvider::new("key".into(), "gpt-test".into(), None);
+        let tool_call = ToolCall {
+            id: "call_42".to_string(),
+            name: "lookup".to_string(),
+            arguments: json!({"q": "ping"}),
+        };
+        let body = provider.build_request_body(
+            &[
+                Message::text("user", "look it up"),
+                Message::assistant_with_tools("on it", vec![tool_call.clone()]),
+                Message::tool_result(&tool_call.id, "{\"answer\":\"pong\"}"),
+            ],
+            &[],
+        );
+
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+
+        // Plain user message untouched.
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], "look it up");
+
+        // Assistant turn carries `tool_calls` with arguments encoded as JSON
+        // string (OpenAI quirk) and content present alongside.
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["content"], "on it");
+        let calls = messages[1]["tool_calls"].as_array().unwrap();
+        assert_eq!(calls[0]["id"], "call_42");
+        assert_eq!(calls[0]["type"], "function");
+        assert_eq!(calls[0]["function"]["name"], "lookup");
+        let raw_args = calls[0]["function"]["arguments"].as_str().unwrap();
+        let parsed_args: serde_json::Value = serde_json::from_str(raw_args).unwrap();
+        assert_eq!(parsed_args["q"], "ping");
+
+        // Tool result becomes role: tool with the matching tool_call_id.
+        assert_eq!(messages[2]["role"], "tool");
+        assert_eq!(messages[2]["tool_call_id"], "call_42");
+        assert_eq!(messages[2]["content"], "{\"answer\":\"pong\"}");
+    }
+
+    #[test]
+    fn assistant_tool_use_without_text_sends_null_content() {
+        let provider = OpenAiProvider::new("key".into(), "gpt-test".into(), None);
+        let body = provider.build_request_body(
+            &[Message::assistant_with_tools(
+                "",
+                vec![ToolCall {
+                    id: "call_silent".to_string(),
+                    name: "ping".to_string(),
+                    arguments: json!({}),
+                }],
+            )],
+            &[],
+        );
+
+        assert!(body["messages"][0]["content"].is_null());
+        assert!(body["messages"][0]["tool_calls"].is_array());
     }
 }
