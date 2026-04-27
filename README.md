@@ -45,17 +45,21 @@ Requires a stable Rust toolchain (edition 2021).
 hiveloom serve --data-dir ./data
 
 # 2. In another shell, store your LLM provider key
-echo "$ANTHROPIC_API_KEY" | hiveloom credential add anthropic --from-stdin
+printf '%s' "$ANTHROPIC_API_KEY" | hiveloom credential set anthropic
 
 # 3. Create an agent that uses it
-hiveloom agent create my-agent \
-  --provider anthropic \
-  --model claude-sonnet-4-6 \
-  --system "You are a terse helpful assistant."
+hiveloom agent create \
+  --name my-agent \
+  --model claude-sonnet-4-20250514 \
+  --system-prompt "You are a terse helpful assistant."
 
 # 4. Chat with it
 hiveloom chat my-agent
 ```
+
+For OpenAI or OpenAI-compatible models, store the key as `openai`, choose a
+non-`claude-*` model ID, and set `HIVELOOM_OPENAI_BASE_URL` when the endpoint is
+not OpenAI's default `https://api.openai.com/v1`.
 
 For a full VPS-backed setup (TLS via Caddy, systemd, MCP clients), see
 [docs.hiveloom.cloud](https://docs.hiveloom.cloud).
@@ -96,11 +100,12 @@ User-facing docs and the guided install-to-chat journey live at
 - [`docs/claude-mcp-setup.md`](docs/claude-mcp-setup.md) — shortest path to HTTPS
   on your VPS so Claude Code / Desktop / Cursor can use it as an MCP connector.
   Uses a free Cloudflare Tunnel; no open ports, no cert renewal.
-- [`docs/deployment-hardening.md`](docs/deployment-hardening.md) — advanced:
+- [Deploy on a VPS](https://docs.hiveloom.cloud/deploy/vps) — advanced:
   self-hosted TLS via Caddy + Let's Encrypt, firewall rules, and systemd
   hardening. For operators who don't want Cloudflare in the path.
-- [`docs/hiveloom-cli-manual-local-testing.md`](docs/hiveloom-cli-manual-local-testing.md) —
-  walkthrough for exercising the CLI end-to-end on a local machine.
+- [CLI reference](https://docs.hiveloom.cloud/cli) and the
+  [first-agent journey](https://docs.hiveloom.cloud/first-agent/credentials) —
+  exercising the CLI end-to-end, locally or against a remote instance.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — build, test, commit, and PR conventions.
 - [`SECURITY.md`](SECURITY.md) — how to report vulnerabilities privately.
 

@@ -96,7 +96,9 @@ Supporting modules plug in around this loop:
 - `anthropic.rs` uses the Messages API (v2023-06-01); system prompt goes
   top-level, tool calls come from response content blocks.
 - `openai.rs` uses Chat Completions and accepts custom base URLs for
-  OpenAI-compatible endpoints (vLLM, Ollama, Together AI).
+  OpenAI-compatible endpoints (vLLM, Ollama, Together AI). Set
+  `HIVELOOM_OPENAI_BASE_URL` to override the default `https://api.openai.com/v1`
+  endpoint.
 
 Resolution in `llm/mod.rs` picks the provider by `model_id` prefix:
 `claude-*` → Anthropic, everything else → OpenAI-compatible.

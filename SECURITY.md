@@ -45,7 +45,7 @@ Out of scope:
 - Third-party MCP clients (Claude Desktop, Cursor, etc.).
 - User-provided LLM providers and their API keys.
 - Misconfigurations of self-hosted deployments (e.g. Caddy, firewalls) —
-  [`docs/deployment-hardening.md`](docs/deployment-hardening.md) covers the
+  [Deploy on a VPS](https://docs.hiveloom.cloud/deploy/vps) covers the
   defaults we recommend.
 
 ## Disclosure

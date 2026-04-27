@@ -130,7 +130,7 @@ connector settings for the exact UI.
 - **MCP client says "unauthorized".** The bearer token doesn't match any
   `mcp-identity` on that agent. Regenerate with `hiveloom mcp-identity create`.
 - **I want HTTPS without Cloudflare.** See
-  [`docs/deployment-hardening.md`](deployment-hardening.md) for the full Caddy +
+  [Deploy on a VPS](https://docs.hiveloom.cloud/deploy/vps) for the full Caddy +
   Let's Encrypt + firewall path.
 
 ## What this does and doesn't buy you
