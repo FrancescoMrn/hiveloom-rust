@@ -29,7 +29,7 @@ pub struct EventArgs {
 pub enum EventCommand {
     /// Create an event subscription for an agent
     Subscribe {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
         /// Event type to subscribe to
         #[arg(long)]
@@ -43,33 +43,33 @@ pub enum EventCommand {
     },
     /// List event subscriptions for an agent
     List {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
     },
     /// Show event subscription details
     Show {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
         /// Subscription ID
         subscription: String,
     },
     /// Disable an event subscription
     Disable {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
         /// Subscription ID
         subscription: String,
     },
     /// Enable an event subscription
     Enable {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
         /// Subscription ID
         subscription: String,
     },
     /// Delete an event subscription
     Delete {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
         /// Subscription ID
         subscription: String,

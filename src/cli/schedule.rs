@@ -29,7 +29,7 @@ pub struct ScheduleArgs {
 pub enum ScheduleCommand {
     /// Create a new scheduled job for an agent
     Create {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
         /// Cron expression (5-field standard cron or 6-field cron with seconds)
         #[arg(long)]
@@ -46,33 +46,33 @@ pub enum ScheduleCommand {
     },
     /// List scheduled jobs for an agent
     List {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
     },
     /// Show scheduled job details
     Show {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
         /// Job ID
         job: String,
     },
     /// Pause a scheduled job
     Pause {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
         /// Job ID
         job: String,
     },
     /// Resume a paused scheduled job
     Resume {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
         /// Job ID
         job: String,
     },
     /// Delete a scheduled job
     Delete {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
         /// Job ID
         job: String,

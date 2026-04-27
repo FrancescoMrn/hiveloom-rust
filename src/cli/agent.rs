@@ -69,7 +69,7 @@ pub enum AgentCommand {
     },
     /// Export agent definition as YAML manifest
     Export { id: String },
-    /// Trigger agent self-reflection (placeholder)
+    /// Trigger agent self-reflection
     Reflect { id: String },
     /// Bind agent to a chat surface
     Bind {

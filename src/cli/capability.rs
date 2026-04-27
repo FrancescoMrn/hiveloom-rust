@@ -29,7 +29,7 @@ pub struct CapabilityArgs {
 pub enum CapabilityCommand {
     /// Add a capability to an agent
     Add {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
         /// Capability name
         #[arg(long)]
@@ -52,22 +52,22 @@ pub enum CapabilityCommand {
     },
     /// List capabilities for an agent
     List {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
     },
     /// Show capability details
     Show {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
-        /// Capability name
-        name: String,
+        /// Capability ID or name
+        capability: String,
     },
     /// Edit a capability
     Edit {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
-        /// Capability name
-        name: String,
+        /// Capability ID or name
+        capability: String,
         #[arg(long)]
         description: Option<String>,
         #[arg(long)]
@@ -76,13 +76,16 @@ pub enum CapabilityCommand {
         auth_type: Option<String>,
         #[arg(long)]
         credential_ref: Option<String>,
+        /// Replace markdown skill content from a file
+        #[arg(long)]
+        from_file: Option<String>,
     },
     /// Remove a capability from an agent
     Remove {
-        /// Agent ID
+        /// Agent ID or name
         agent: String,
-        /// Capability name
-        name: String,
+        /// Capability ID or name
+        capability: String,
     },
 }
 
@@ -98,6 +101,12 @@ struct CapabilityResponse {
     pub auth_type: String,
     #[serde(default)]
     pub credential_ref: Option<String>,
+    #[serde(default)]
+    pub input_schema: Option<String>,
+    #[serde(default)]
+    pub output_schema: Option<String>,
+    #[serde(default)]
+    pub instruction_content: Option<String>,
     #[serde(default)]
     pub created_at: String,
     #[serde(default)]
@@ -180,10 +189,10 @@ pub async fn run(args: CapabilityArgs) -> anyhow::Result<()> {
                 println!("\n{} capability(ies)", caps.len());
             }
         }
-        CapabilityCommand::Show { agent, name } => {
+        CapabilityCommand::Show { agent, capability } => {
             let cap: CapabilityResponse = client
                 .get(&format!(
-                    "/api/tenants/{tid}/agents/{agent}/capabilities/{name}"
+                    "/api/tenants/{tid}/agents/{agent}/capabilities/{capability}"
                 ))
                 .await?;
             if json_out {
@@ -204,21 +213,43 @@ pub async fn run(args: CapabilityArgs) -> anyhow::Result<()> {
         }
         CapabilityCommand::Edit {
             agent,
-            name,
+            capability,
             description,
             cap_endpoint,
             auth_type,
             credential_ref,
+            from_file,
         } => {
+            let current: CapabilityResponse = client
+                .get(&format!(
+                    "/api/tenants/{tid}/agents/{agent}/capabilities/{capability}"
+                ))
+                .await?;
+
+            let instruction_content = if let Some(ref path) = from_file {
+                let content = std::fs::read_to_string(path)
+                    .map_err(|e| anyhow::anyhow!("Failed to read file '{}': {}", path, e))?;
+                if !json_out {
+                    eprintln!("Reading {} ({} bytes)...", path, content.len());
+                }
+                Some(content)
+            } else {
+                current.instruction_content
+            };
+
             let body = serde_json::json!({
-                "description": description,
-                "endpoint_url": cap_endpoint,
-                "auth_type": auth_type,
-                "credential_ref": credential_ref,
+                "name": current.name,
+                "description": description.unwrap_or(current.description),
+                "endpoint_url": cap_endpoint.unwrap_or(current.endpoint_url),
+                "auth_type": auth_type.unwrap_or(current.auth_type),
+                "credential_ref": credential_ref.or(current.credential_ref),
+                "input_schema": current.input_schema,
+                "output_schema": current.output_schema,
+                "instruction_content": instruction_content,
             });
             let cap: CapabilityResponse = client
                 .put(
-                    &format!("/api/tenants/{tid}/agents/{agent}/capabilities/{name}"),
+                    &format!("/api/tenants/{tid}/agents/{agent}/capabilities/{capability}"),
                     &body,
                 )
                 .await?;
@@ -228,13 +259,13 @@ pub async fn run(args: CapabilityArgs) -> anyhow::Result<()> {
                 println!("Updated capability '{}'", cap.name);
             }
         }
-        CapabilityCommand::Remove { agent, name } => {
+        CapabilityCommand::Remove { agent, capability } => {
             client
                 .delete(&format!(
-                    "/api/tenants/{tid}/agents/{agent}/capabilities/{name}"
+                    "/api/tenants/{tid}/agents/{agent}/capabilities/{capability}"
                 ))
                 .await?;
-            println!("Removed capability '{name}' from agent {agent}");
+            println!("Removed capability '{capability}' from agent {agent}");
         }
     }
 
